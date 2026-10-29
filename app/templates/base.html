@@ -34,8 +34,12 @@
               <li><a class="nav-link" href="{{ url_for('admin.personalization_rules') }}">شخصی‌سازی</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.learning_path') }}">مسیر آموزشی</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.assistant_control') }}">کنترل دستیار</a></li>
+              <li><a class="nav-link" href="{{ url_for('admin.scientific_review') }}">تأیید علمی</a></li>
+              <li><a class="nav-link" href="{{ url_for('admin.operations') }}">اثربخشی و عملیات</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.tree_builder') }}">درخت مسیر</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.form_builder') }}">فرم‌ساز</a></li>
+            {% elif current_user.is_reviewer %}
+              <li><a class="nav-link" href="{{ url_for('admin.scientific_review') }}">کارتابل ناظر علمی</a></li>
             {% else %}
               <li><a class="nav-link" href="{{ url_for('parent.dashboard') }}">داشبورد من</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.projects') }}">حمایت سازمانی</a></li>
@@ -46,6 +50,7 @@
               <li><a class="nav-link" href="{{ url_for('parent.recommendations') }}">برنامه‌ها</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.skills') }}">مهارت‌ها</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.scenario') }}">موقعیت‌ها</a></li>
+              <li><a class="nav-link" href="{{ url_for('parent.privacy_center') }}">حریم خصوصی</a></li>
             {% endif %}
             <li class="nav-item dropdown">
               <a class="nav-link dropdown-toggle user-chip" href="#" data-bs-toggle="dropdown"><i class="fa-regular fa-circle-user"></i> {{ current_user.full_name }}</a>

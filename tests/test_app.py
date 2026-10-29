@@ -9,6 +9,8 @@ from app.models import (
     AssistantMessage,
     Child,
     ChildProfileSnapshot,
+    ConsentRecord,
+    DataDeletionRequest,
     DailyAction,
     HomeActionOutcome,
     MicroLesson,
@@ -21,6 +23,7 @@ from app.models import (
     PlanReview,
     RecommendationRun,
     SafetyProtocol,
+    ScientificReview,
     ScenarioTopic,
     SkillDomain,
     SkillProgress,
@@ -46,6 +49,7 @@ def test_register_normalizes_persian_digits(client, app):
             "full_name": "مادر نمونه",
             "mobile": "۰۹۱۲۳۴۵۶۷۸۹",
             "password": "SecurePass123",
+                "privacy_consent": "1",
         },
         follow_redirects=False,
     )
@@ -763,4 +767,123 @@ def test_parent_feedback_and_admin_protocol_versioning(client, app):
     assert update.status_code == 302
     with app.app_context():
         assert db.session.get(SafetyProtocol, protocol_id).version == 2
+
+
+def test_stage_six_readiness_and_operations_dashboard(client):
+    readiness = client.get("/health/ready")
+    assert readiness.status_code == 200
+    assert readiness.get_json()["database"] == "available"
+    login(client, mobile="09120000001", password="AdminPass123")
+    page = client.get("/admin/operations")
+    assert page.status_code == 200
+    assert "اثربخشی، حریم خصوصی" in page.get_data(as_text=True)
+
+
+def test_registration_requires_and_records_versioned_consent(client, app):
+    refused = client.post(
+        "/auth/register",
+        data={
+            "full_name": "والد بدون رضایت",
+            "mobile": "09121111111",
+            "password": "SecurePass123",
+        },
+    )
+    assert refused.status_code == 200
+    accepted = client.post(
+        "/auth/register",
+        data={
+            "full_name": "والد رضایت داده",
+            "mobile": "09121111112",
+            "password": "SecurePass123",
+            "privacy_consent": "1",
+        },
+    )
+    assert accepted.status_code == 302
+    with app.app_context():
+        user = User.query.filter_by(mobile="09121111112").one()
+        consent = ConsentRecord.query.filter_by(user_id=user.id).one()
+        assert consent.accepted is True
+        assert consent.policy_version == "1405-08-07-v1"
+
+
+def test_child_deletion_request_is_audited_and_isolated(client, app):
+    login(client)
+    client.post(
+        "/dashboard/children",
+        data={"name": "سارا", "birth_year": "1394", "gender": "girl"},
+    )
+    with app.app_context():
+        child = Child.query.filter_by(name="سارا").one()
+        child_id = child.id
+    response = client.post(
+        "/dashboard/privacy",
+        data={"child_id": child_id, "confirmation": "سارا", "reason": "درخواست خانواده"},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        deletion_id = DataDeletionRequest.query.one().id
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    processed = client.post(
+        f"/admin/privacy/deletion/{deletion_id}",
+        data={"action": "complete", "note": "مالکیت بررسی شد"},
+    )
+    assert processed.status_code == 302
+    with app.app_context():
+        assert db.session.get(Child, child_id) is None
+        assert db.session.get(DataDeletionRequest, deletion_id).status == "completed"
+
+
+def test_scientific_reviewer_approves_exact_snapshot(client, app):
+    with app.app_context():
+        reviewer = User(full_name="ناظر علمی", mobile="09120000009", role="reviewer")
+        reviewer.set_password("ReviewerPass123")
+        db.session.add(reviewer)
+        db.session.commit()
+        protocol_id = SafetyProtocol.query.first().id
+    login(client, mobile="09120000001", password="AdminPass123")
+    requested = client.post(
+        "/admin/scientific-review",
+        data={"action": "request", "resource_type": "protocol", "resource_id": protocol_id},
+    )
+    assert requested.status_code == 302
+    with app.app_context():
+        review_id = ScientificReview.query.one().id
+        fingerprint = ScientificReview.query.one().snapshot_hash
+    assert client.post(
+        "/admin/scientific-review",
+        data={"action": "approve", "review_id": review_id},
+    ).status_code == 403
+    client.post("/auth/logout")
+    login(client, mobile="09120000009", password="ReviewerPass123")
+    approved = client.post(
+        "/admin/scientific-review",
+        data={
+            "action": "approve",
+            "review_id": review_id,
+            "reviewer_note": "نسخه حاضر برای پایلوت تأیید است.",
+        },
+    )
+    assert approved.status_code == 302
+    with app.app_context():
+        review = db.session.get(ScientificReview, review_id)
+        assert review.status == "approved"
+        assert review.snapshot_hash == fingerprint
+
+
+def test_anonymous_project_report_suppresses_small_groups(client, app):
+    create_sponsored_project(client)
+    with app.app_context():
+        project = SponsoredProject.query.filter_by(code="ORG-70").one()
+        project_id, code = project.id, project.code
+    login(client)
+    client.post("/dashboard/projects", data={"action": "join", "code": code})
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    report = client.get(f"/admin/projects/{project_id}/impact.csv")
+    text = report.get_data(as_text=True)
+    assert report.status_code == 200
+    assert "حفاظت حریم خصوصی" in text
+    assert "09120000002" not in text
+    assert "والد آزمون" not in text
 

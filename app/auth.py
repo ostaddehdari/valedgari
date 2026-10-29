@@ -4,7 +4,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_user, logout_user
 
 from .extensions import db
-from .models import User
+from .models import ConsentRecord, User
 from .security import normalize_mobile, valid_mobile
 
 
@@ -20,7 +20,11 @@ def safe_next_url(target):
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        endpoint = "admin.dashboard" if current_user.is_admin else "parent.dashboard"
+        endpoint = (
+            "admin.dashboard"
+            if current_user.is_admin
+            else ("admin.scientific_review" if current_user.is_reviewer else "parent.dashboard")
+        )
         return redirect(url_for(endpoint))
 
     if request.method == "POST":
@@ -36,7 +40,12 @@ def login():
             target = request.args.get("next")
             if target and safe_next_url(target):
                 return redirect(target)
-            return redirect(url_for("admin.dashboard" if user.is_admin else "parent.dashboard"))
+            endpoint = (
+                "admin.dashboard"
+                if user.is_admin
+                else ("admin.scientific_review" if user.is_reviewer else "parent.dashboard")
+            )
+            return redirect(url_for(endpoint))
     return render_template("auth/login.html")
 
 
@@ -55,6 +64,8 @@ def register():
             errors.append("شماره موبایل باید با ۰۹ شروع شود و ۱۱ رقم باشد.")
         if len(password) < 8:
             errors.append("رمز عبور باید حداقل ۸ نویسه باشد.")
+        if request.form.get("privacy_consent") != "1":
+            errors.append("پذیرش سیاست حریم خصوصی برای ساخت پرونده کودک الزامی است.")
         if User.query.filter_by(mobile=mobile).first():
             errors.append("برای این شماره موبایل قبلاً حساب ساخته شده است.")
         if errors:
@@ -64,6 +75,14 @@ def register():
             user = User(full_name=name, mobile=mobile, role="parent")
             user.set_password(password)
             db.session.add(user)
+            db.session.flush()
+            db.session.add(
+                ConsentRecord(
+                    user_id=user.id,
+                    policy_version="1405-08-07-v1",
+                    source="registration",
+                )
+            )
             db.session.commit()
             login_user(user, remember=True)
             flash("حساب والدین با موفقیت ساخته شد؛ حالا اولین فرزند را اضافه کنید.", "success")

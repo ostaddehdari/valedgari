@@ -1,0 +1,14 @@
+[Unit]
+Description=Valedgari backup restore drill
+After=valedgari-backup.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/var/www/valedgari/deploy/restore-test.sh
+Nice=15
+PrivateTmp=false
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/tmp /var/www/valedgari/instance
+ReadOnlyPaths=/var/backups/valedgari

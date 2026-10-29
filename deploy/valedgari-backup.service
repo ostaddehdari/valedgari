@@ -1,0 +1,14 @@
+[Unit]
+Description=Valedgari SQLite consistent backup
+After=valedgari.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/var/www/valedgari/deploy/backup-db.sh
+Nice=10
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/valedgari
+ReadOnlyPaths=/var/www/valedgari/instance

@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import date, datetime, timezone
 
 from flask_login import UserMixin
@@ -35,6 +36,14 @@ class User(UserMixin, db.Model):
     @property
     def is_admin(self):
         return self.role == "admin"
+
+    @property
+    def is_reviewer(self):
+        return self.role == "reviewer"
+
+    @property
+    def is_staff(self):
+        return self.role in {"admin", "reviewer"}
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password, method="scrypt")
@@ -841,4 +850,88 @@ class HomeActionOutcome(db.Model):
     updated_at = db.Column(
         db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
+
+
+class ConsentRecord(db.Model):
+    """Versioned evidence of the parent's privacy/child-data consent."""
+
+    __tablename__ = "consent_records"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    policy_version = db.Column(db.String(30), nullable=False, index=True)
+    purpose = db.Column(db.String(80), nullable=False, default="parenting_guidance")
+    accepted = db.Column(db.Boolean, nullable=False, default=True)
+    source = db.Column(db.String(40), nullable=False, default="registration")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    user = db.relationship("User")
+
+
+class DataDeletionRequest(db.Model):
+    """Auditable parent request for deleting one child's records."""
+
+    __tablename__ = "data_deletion_requests"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, nullable=False, index=True)
+    child_name_snapshot = db.Column(db.String(80), nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="pending", index=True)
+    reason = db.Column(db.String(700), nullable=False, default="")
+    requested_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    processed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    processed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    processing_note = db.Column(db.String(700), nullable=False, default="")
+
+    parent = db.relationship("User", foreign_keys=[user_id])
+    processor = db.relationship("User", foreign_keys=[processed_by])
+
+
+class ScientificReview(db.Model):
+    """Independent, version-bound approval for publishable scientific content."""
+
+    __tablename__ = "scientific_reviews"
+    id = db.Column(db.Integer, primary_key=True)
+    resource_type = db.Column(db.String(40), nullable=False, index=True)
+    resource_id = db.Column(db.Integer, nullable=False, index=True)
+    resource_title = db.Column(db.String(220), nullable=False)
+    resource_version = db.Column(db.String(40), nullable=False)
+    snapshot_hash = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    requested_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    reviewer_note = db.Column(db.String(1000), nullable=False, default="")
+
+    requester = db.relationship("User", foreign_keys=[requested_by])
+    reviewer = db.relationship("User", foreign_keys=[reviewed_by])
+    __table_args__ = (
+        db.UniqueConstraint(
+            "resource_type", "resource_id", "resource_version", "snapshot_hash"
+        ),
+    )
+
+    @staticmethod
+    def fingerprint(payload):
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class OperationalEvent(db.Model):
+    """Small internal audit stream for backup/restore/retention operations."""
+
+    __tablename__ = "operational_events"
+    id = db.Column(db.Integer, primary_key=True)
+    event_type = db.Column(db.String(60), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, index=True)
+    details_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    @property
+    def details(self):
+        try:
+            value = json.loads(self.details_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 

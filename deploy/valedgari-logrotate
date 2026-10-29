@@ -1,0 +1,12 @@
+/var/log/nginx/*valedgari*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        test ! -r /run/nginx.pid || kill -USR1 `cat /run/nginx.pid`
+    endscript
+}

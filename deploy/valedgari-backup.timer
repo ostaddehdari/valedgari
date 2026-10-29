@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Valedgari backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+Persistent=true
+RandomizedDelaySec=900
+Unit=valedgari-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -4,7 +4,7 @@ import json
 import re
 from datetime import date
 
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from .extensions import db
@@ -16,9 +16,12 @@ from .models import (
     AssistantMessage,
     Child,
     ChildProfileSnapshot,
+    ConsentRecord,
+    DataDeletionRequest,
     DailyAction,
     DecisionNode,
     DynamicForm,
+    FormResponse,
     Organization,
     PaymentAllocation,
     ParentingAssessment,
@@ -26,21 +29,33 @@ from .models import (
     PersonalizationRule,
     ProjectAuditLog,
     ProjectMembership,
+    ScenarioAttempt,
     ScenarioLevel,
     ScenarioTopic,
     SafetyProtocol,
+    ScientificReview,
     SkillModule,
+    SkillProgress,
     SponsoredProject,
     User,
     HomeActionOutcome,
     MicroLesson,
+    OperationalEvent,
     PlanReview,
     RecommendationRun,
     SkillDomain,
     WeeklyPlan,
     utcnow,
 )
-from .security import admin_required
+from .effectiveness import activation_funnel, outcome_summary, project_anonymous_report
+from .governance import (
+    RESOURCE_MODELS,
+    approved_for_current_snapshot,
+    resource_snapshot,
+    resource_title,
+    resource_version,
+)
+from .security import admin_required, scientific_staff_required
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -94,6 +109,27 @@ def audit_project(project, action, details=None):
             details_json=json.dumps(details or {}, ensure_ascii=False),
         )
     )
+
+
+def delete_child_records(child):
+    """Delete the child and all directly linked educational records in a safe order."""
+    child_id = child.id
+    for item in AssistantConversation.query.filter_by(child_id=child_id).all():
+        db.session.delete(item)
+    for item in WeeklyPlan.query.filter_by(child_id=child_id).all():
+        db.session.delete(item)
+    for item in RecommendationRun.query.filter_by(child_id=child_id).all():
+        db.session.delete(item)
+    for model in (
+        ParentingAssessment,
+        SkillProgress,
+        ScenarioAttempt,
+        FormResponse,
+        ParentingStyleAssessment,
+        ChildProfileSnapshot,
+    ):
+        model.query.filter_by(child_id=child_id).delete(synchronize_session=False)
+    db.session.delete(child)
 
 
 def project_form_values(project=None):
@@ -168,6 +204,150 @@ def dashboard():
     }
     recent_users = User.query.order_by(User.created_at.desc()).limit(6).all()
     return render_template("admin/dashboard.html", stats=stats, recent_users=recent_users)
+
+
+@bp.get("/operations")
+@login_required
+@admin_required
+def operations():
+    funnel = activation_funnel()
+    outcomes = outcome_summary()
+    deletion_requests = DataDeletionRequest.query.order_by(
+        DataDeletionRequest.requested_at.desc()
+    ).limit(20).all()
+    recent_events = OperationalEvent.query.order_by(
+        OperationalEvent.created_at.desc()
+    ).limit(20).all()
+    approved_reviews = ScientificReview.query.filter_by(status="approved").count()
+    pending_reviews = ScientificReview.query.filter_by(status="pending").count()
+    operations_state = {
+        "payment_provider": current_app.config["PAYMENT_PROVIDER"],
+        "payment_ready": bool(current_app.config["PAYMENT_MERCHANT_ID"]),
+        "scientific_gate": current_app.config["REQUIRE_SCIENTIFIC_APPROVAL"],
+        "policy_version": current_app.config["PRIVACY_POLICY_VERSION"],
+        "consents": ConsentRecord.query.count(),
+        "pending_deletions": DataDeletionRequest.query.filter_by(status="pending").count(),
+        "pending_reviews": pending_reviews,
+        "approved_reviews": approved_reviews,
+    }
+    return render_template(
+        "admin/operations.html",
+        funnel=funnel,
+        outcomes=outcomes,
+        deletion_requests=deletion_requests,
+        recent_events=recent_events,
+        operations_state=operations_state,
+    )
+
+
+@bp.post("/privacy/deletion/<int:request_id>")
+@login_required
+@admin_required
+def process_deletion_request(request_id):
+    deletion = db.get_or_404(DataDeletionRequest, request_id)
+    if deletion.status != "pending":
+        flash("این درخواست قبلاً بررسی شده است.", "warning")
+        return redirect(url_for("admin.operations"))
+    action = request.form.get("action")
+    note = request.form.get("note", "").strip()[:700]
+    if action == "complete":
+        child = db.session.get(Child, deletion.child_id)
+        if not child or child.user_id != deletion.user_id:
+            deletion.status = "rejected"
+            deletion.processing_note = "پرونده در زمان بررسی وجود نداشت یا مالکیت تطبیق نداشت."
+        else:
+            delete_child_records(child)
+            deletion.status = "completed"
+            deletion.processing_note = note or "پرونده و داده‌های آموزشی متصل حذف شد."
+        event_status = "success"
+    elif action == "reject":
+        deletion.status = "rejected"
+        deletion.processing_note = note or "درخواست پس از بررسی رد شد."
+        event_status = "warning"
+    else:
+        abort(400)
+    deletion.processed_by = current_user.id
+    deletion.processed_at = utcnow()
+    db.session.add(
+        OperationalEvent(
+            event_type="child_data_deletion",
+            status=event_status,
+            details_json=json.dumps(
+                {"request_id": deletion.id, "result": deletion.status}, ensure_ascii=False
+            ),
+        )
+    )
+    db.session.commit()
+    flash("نتیجه درخواست حذف ثبت شد.", "success")
+    return redirect(url_for("admin.operations"))
+
+
+@bp.route("/scientific-review", methods=["GET", "POST"])
+@login_required
+@scientific_staff_required
+def scientific_review():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "request":
+            if not current_user.is_admin:
+                abort(403)
+            resource_type = request.form.get("resource_type", "")
+            model = RESOURCE_MODELS.get(resource_type)
+            resource = db.session.get(model, request.form.get("resource_id", type=int)) if model else None
+            if not resource:
+                abort(404)
+            fingerprint = ScientificReview.fingerprint(
+                resource_snapshot(resource_type, resource)
+            )
+            review = ScientificReview.query.filter_by(
+                resource_type=resource_type,
+                resource_id=resource.id,
+                resource_version=resource_version(resource_type, resource),
+                snapshot_hash=fingerprint,
+            ).first()
+            if review and review.status == "approved":
+                flash("همین نسخه و محتوا قبلاً تأیید شده است.", "info")
+            else:
+                if not review:
+                    review = ScientificReview(
+                        resource_type=resource_type,
+                        resource_id=resource.id,
+                        resource_title=resource_title(resource_type, resource),
+                        resource_version=resource_version(resource_type, resource),
+                        snapshot_hash=fingerprint,
+                        requested_by=current_user.id,
+                    )
+                    db.session.add(review)
+                else:
+                    review.status = "pending"
+                    review.reviewer_note = ""
+                    review.reviewed_by = None
+                    review.reviewed_at = None
+                db.session.commit()
+                flash("نسخه فعلی برای ناظر علمی ارسال شد.", "success")
+        elif action in {"approve", "reject"}:
+            if not current_user.is_reviewer:
+                abort(403)
+            review = db.get_or_404(ScientificReview, request.form.get("review_id", type=int))
+            if review.status != "pending":
+                flash("این مورد قبلاً بررسی شده است.", "warning")
+            else:
+                review.status = "approved" if action == "approve" else "rejected"
+                review.reviewed_by = current_user.id
+                review.reviewed_at = utcnow()
+                review.reviewer_note = request.form.get("reviewer_note", "").strip()[:1000]
+                db.session.commit()
+                flash("رأی ناظر علمی ثبت شد.", "success")
+        return redirect(url_for("admin.scientific_review"))
+
+    reviews = ScientificReview.query.order_by(ScientificReview.requested_at.desc()).all()
+    resources = {
+        "instrument": AssessmentInstrument.query.all(),
+        "lesson": MicroLesson.query.order_by(MicroLesson.id.desc()).all(),
+        "rule": PersonalizationRule.query.order_by(PersonalizationRule.id.desc()).all(),
+        "protocol": SafetyProtocol.query.order_by(SafetyProtocol.id.desc()).all(),
+    }
+    return render_template("admin/scientific_review.html", reviews=reviews, resources=resources)
 
 
 def instrument_publish_errors(instrument):
@@ -287,12 +467,18 @@ def baumrind_instrument():
                 return redirect(url_for("admin.baumrind_instrument"))
         elif action == "publish":
             errors = instrument_publish_errors(instrument)
+            if (
+                current_app.config["REQUIRE_SCIENTIFIC_APPROVAL"]
+                and not approved_for_current_snapshot("instrument", instrument)
+            ):
+                errors.append("انتشار production فقط پس از تأیید مستقل همین نسخه توسط ناظر علمی ممکن است.")
             if errors:
                 for error in errors:
                     flash(error, "danger")
             else:
                 instrument.status = "published"
-                instrument.approved_by = current_user.id
+                approval = approved_for_current_snapshot("instrument", instrument)
+                instrument.approved_by = approval.reviewed_by if approval else current_user.id
                 instrument.approved_at = utcnow()
                 db.session.commit()
                 flash("نسخه تأیید و برای والدین منتشر شد.", "success")
@@ -845,6 +1031,50 @@ def project_export(project_id):
         "\ufeff" + stream.getvalue(),
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@bp.get("/projects/<int:project_id>/impact.csv")
+@login_required
+@admin_required
+def project_impact_export(project_id):
+    project = db.get_or_404(SponsoredProject, project_id)
+    report = project_anonymous_report(
+        project, current_app.config["ANONYMOUS_REPORT_MIN_GROUP"]
+    )
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(["شاخص", "مقدار"])
+    writer.writerow(["پروژه", report["project"]])
+    writer.writerow(["سازمان", report["organization"]])
+    writer.writerow(["تعداد اعضا", report["member_count"]])
+    if report["suppressed"]:
+        writer.writerow(
+            [
+                "حفاظت حریم خصوصی",
+                f"شاخص‌های اثربخشی تا رسیدن گروه به {report['minimum_group_size']} عضو نمایش داده نمی‌شوند.",
+            ]
+        )
+    else:
+        writer.writerow(["تعداد فرزندان", report["child_count"]])
+        writer.writerow(["برنامه شروع‌شده", report["plans_started"]])
+        writer.writerow(["برنامه تکمیل‌شده", report["plans_completed"]])
+        writer.writerow(["اقدام تکمیل‌شده", report["actions_completed"]])
+        writer.writerow(["نتیجه ثبت‌شده", report["outcomes"]["recorded_outcomes"]])
+        writer.writerow(["نرخ کمک‌کنندگی (%)", report["outcomes"]["helped_rate"]])
+        writer.writerow(["میانگین اطمینان والد", report["outcomes"]["average_confidence"]])
+    audit_project(
+        project,
+        "anonymous_impact_exported",
+        {"suppressed": report["suppressed"], "minimum_group_size": report["minimum_group_size"]},
+    )
+    db.session.commit()
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="project-{project.id}-anonymous-impact.csv"'
+        },
     )
 
 

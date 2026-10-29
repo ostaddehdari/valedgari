@@ -17,13 +17,14 @@ if [[ ! -f "${APP_DIR}/requirements.txt" ]]; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx sqlite3
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx sqlite3 curl
 
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/pip" install --upgrade pip
 "${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
 
 install -d -o www-data -g www-data -m 750 "${APP_DIR}/instance"
+install -d -o root -g root -m 700 /var/backups/valedgari
 chown -R www-data:www-data "${APP_DIR}/instance"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -33,11 +34,24 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     echo "FLASK_ENV=production"
     echo "SECRET_KEY=${SECRET_VALUE}"
     echo "DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db"
+    echo "APP_VERSION=stage-6"
+    echo "REQUIRE_SCIENTIFIC_APPROVAL=1"
+    echo "ANONYMOUS_REPORT_MIN_GROUP=5"
+    echo "PAYMENT_PROVIDER=manual"
+    echo "PAYMENT_MERCHANT_ID="
   } > "${ENV_FILE}"
 fi
 
 install -m 644 "${APP_DIR}/deploy/valedgari.service" "${SERVICE_FILE}"
 install -m 644 "${APP_DIR}/deploy/nginx-valedgari.conf" "${SNIPPET_FILE}"
+install -m 644 "${APP_DIR}/deploy/valedgari-backup.service" "/etc/systemd/system/valedgari-backup.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-backup.timer" "/etc/systemd/system/valedgari-backup.timer"
+install -m 644 "${APP_DIR}/deploy/valedgari-restore-test.service" "/etc/systemd/system/valedgari-restore-test.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-restore-test.timer" "/etc/systemd/system/valedgari-restore-test.timer"
+install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.service" "/etc/systemd/system/valedgari-healthcheck.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.timer" "/etc/systemd/system/valedgari-healthcheck.timer"
+install -m 644 "${APP_DIR}/deploy/valedgari-logrotate" "/etc/logrotate.d/valedgari"
+chmod 750 "${APP_DIR}/deploy/backup-db.sh" "${APP_DIR}/deploy/restore-test.sh" "${APP_DIR}/deploy/healthcheck.sh"
 
 SITE_FILE="$(grep -RslE 'server_name[^;]*srun\.ir' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -n 1 || true)"
 if [[ -z "${SITE_FILE}" ]]; then
@@ -65,9 +79,10 @@ fi
 nginx -t
 systemctl daemon-reload
 systemctl enable --now valedgari
+systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer valedgari-healthcheck.timer
 systemctl reload nginx
 
 sleep 2
-curl -fsS http://127.0.0.1:8010/health >/dev/null
+curl -fsS http://127.0.0.1:8010/health/ready >/dev/null
 echo "والدیار نصب شد. اکنون مدیر را با دستور تعاملی create-admin بسازید."
 

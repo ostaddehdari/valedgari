@@ -1,3 +1,4 @@
+import json
 import os
 
 import click
@@ -6,7 +7,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config, ProductionConfig
 from .extensions import csrf, db, login_manager
-from .models import User
+from .models import OperationalEvent, User
 from .seed import seed_content
 
 
@@ -86,6 +87,52 @@ def create_app(config_object=None):
         user.set_password(password)
         db.session.commit()
         click.echo("حساب مدیر ایجاد یا به‌روزرسانی شد.")
+
+    @app.cli.command("create-reviewer")
+    @click.option("--mobile", prompt="شماره موبایل ناظر علمی")
+    @click.option("--name", prompt="نام ناظر علمی")
+    @click.password_option(prompt="رمز عبور", confirmation_prompt=True)
+    def create_reviewer(mobile, name, password):
+        from .security import normalize_mobile, valid_mobile
+
+        mobile = normalize_mobile(mobile)
+        if not valid_mobile(mobile):
+            raise click.ClickException("شماره موبایل معتبر نیست.")
+        user = User.query.filter_by(mobile=mobile).first()
+        if not user:
+            user = User(mobile=mobile, full_name=name, role="reviewer")
+            db.session.add(user)
+        user.full_name = name
+        user.role = "reviewer"
+        user.set_password(password)
+        db.session.commit()
+        click.echo("حساب مستقل ناظر علمی ایجاد یا به‌روزرسانی شد.")
+
+    @app.cli.command("record-operation")
+    @click.option("--event-type", required=True)
+    @click.option("--status", type=click.Choice(["success", "warning", "failed"]), required=True)
+    @click.option("--details", default="{}")
+    def record_operation(event_type, status, details):
+        try:
+            payload = json.loads(details)
+        except ValueError as exc:
+            raise click.ClickException("details باید JSON معتبر باشد.") from exc
+        db.session.add(
+            OperationalEvent(
+                event_type=event_type,
+                status=status,
+                details_json=json.dumps(payload, ensure_ascii=False),
+            )
+        )
+        db.session.commit()
+        click.echo("رویداد عملیاتی ثبت شد.")
+
+    @app.cli.command("doctor")
+    def doctor():
+        from sqlalchemy import text
+
+        db.session.execute(text("SELECT 1"))
+        click.echo(f"database=ok version={app.config['APP_VERSION']}")
 
     with app.app_context():
         db.create_all()

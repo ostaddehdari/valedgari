@@ -33,3 +33,15 @@ def admin_required(view):
 
     return wrapped
 
+
+def scientific_staff_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.is_staff:
+            abort(403)
+        return view(*args, **kwargs)
+
+    return wrapped
+

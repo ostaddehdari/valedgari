@@ -1,6 +1,8 @@
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, current_app, jsonify, render_template
 from flask_login import current_user
+from sqlalchemy import text
 
+from .extensions import db
 from .models import ScenarioTopic, SkillModule
 
 
@@ -16,5 +18,29 @@ def index():
 
 @bp.get("/health")
 def health():
-    return jsonify(status="ok", service="valedgari", authenticated=current_user.is_authenticated)
+    return jsonify(
+        status="ok",
+        service="valedgari",
+        version=current_app.config["APP_VERSION"],
+    )
+
+
+@bp.get("/health/live")
+def health_live():
+    return jsonify(status="ok", check="liveness", service="valedgari")
+
+
+@bp.get("/health/ready")
+def health_ready():
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception:
+        current_app.logger.exception("readiness database check failed")
+        return jsonify(status="error", check="database"), 503
+    return jsonify(
+        status="ok",
+        check="readiness",
+        database="available",
+        version=current_app.config["APP_VERSION"],
+    )
 

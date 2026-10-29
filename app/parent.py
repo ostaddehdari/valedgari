@@ -13,6 +13,8 @@ from .models import (
     AssessmentInstrument,
     Child,
     ChildProfileSnapshot,
+    ConsentRecord,
+    DataDeletionRequest,
     DailyAction,
     HomeActionOutcome,
     PlanReview,
@@ -564,6 +566,46 @@ def activate_child(child_id):
     session["active_child_id"] = child.id
     flash(f"اکنون مسیر اختصاصی {child.name} را می‌بینید.", "info")
     return redirect(request.referrer or url_for("parent.dashboard"))
+
+
+@bp.route("/privacy", methods=["GET", "POST"])
+@login_required
+def privacy_center():
+    if request.method == "POST":
+        child = owned_child(request.form.get("child_id", type=int))
+        confirmation = request.form.get("confirmation", "").strip()
+        if confirmation != child.name:
+            flash("برای ثبت درخواست، نام فرزند را دقیقاً وارد کنید.", "danger")
+        else:
+            existing = DataDeletionRequest.query.filter_by(
+                user_id=current_user.id, child_id=child.id, status="pending"
+            ).first()
+            if existing:
+                flash("برای این پرونده یک درخواست حذف باز وجود دارد.", "warning")
+            else:
+                db.session.add(
+                    DataDeletionRequest(
+                        user_id=current_user.id,
+                        child_id=child.id,
+                        child_name_snapshot=child.name,
+                        reason=request.form.get("reason", "").strip()[:700],
+                    )
+                )
+                db.session.commit()
+                flash(
+                    "درخواست حذف ثبت شد. تا زمان بررسی مدیر، داده‌ای حذف نمی‌شود و می‌توانید با پشتیبانی آن را لغو کنید.",
+                    "success",
+                )
+                return redirect(url_for("parent.privacy_center"))
+    consents = ConsentRecord.query.filter_by(user_id=current_user.id).order_by(
+        ConsentRecord.created_at.desc()
+    ).all()
+    requests = DataDeletionRequest.query.filter_by(user_id=current_user.id).order_by(
+        DataDeletionRequest.requested_at.desc()
+    ).all()
+    return render_template(
+        "parent/privacy.html", consents=consents, deletion_requests=requests
+    )
 
 
 @bp.route("/assessment", methods=["GET", "POST"])

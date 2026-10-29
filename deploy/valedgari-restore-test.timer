@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Valedgari restore drill
+
+[Timer]
+OnCalendar=Sun *-*-* 03:20:00
+Persistent=true
+RandomizedDelaySec=1200
+Unit=valedgari-restore-test.service
+
+[Install]
+WantedBy=timers.target
