@@ -19,12 +19,16 @@ from .models import (
     PaymentAllocation,
     ParentingAssessment,
     ParentingStyleAssessment,
+    PersonalizationRule,
     ProjectAuditLog,
     ProjectMembership,
     ScenarioLevel,
     ScenarioTopic,
+    SkillModule,
     SponsoredProject,
     User,
+    HomeActionOutcome,
+    RecommendationRun,
     utcnow,
 )
 from .security import admin_required
@@ -148,6 +152,8 @@ def dashboard():
         "projects": SponsoredProject.query.count(),
         "profiles": ChildProfileSnapshot.query.count(),
         "style_assessments": ParentingStyleAssessment.query.count(),
+        "recommendations": RecommendationRun.query.count(),
+        "outcomes": HomeActionOutcome.query.count(),
     }
     recent_users = User.query.order_by(User.created_at.desc()).limit(6).all()
     return render_template("admin/dashboard.html", stats=stats, recent_users=recent_users)
@@ -296,6 +302,152 @@ def baumrind_instrument():
         dimensions=dimensions,
         usage_count=usage_count,
         publish_errors=instrument_publish_errors(instrument),
+    )
+
+
+@bp.route("/personalization", methods=["GET", "POST"])
+@login_required
+@admin_required
+def personalization_rules():
+    topics = ScenarioTopic.query.order_by(ScenarioTopic.id).all()
+    topic_id = request.values.get("topic_id", type=int) or (topics[0].id if topics else None)
+    selected_topic = db.session.get(ScenarioTopic, topic_id) if topic_id else None
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_rule":
+            selected_topic = db.session.get(
+                ScenarioTopic, request.form.get("topic_id", type=int)
+            )
+            if not selected_topic:
+                abort(404)
+            rule_id = request.form.get("rule_id", type=int)
+            rule = db.session.get(PersonalizationRule, rule_id) if rule_id else None
+            if rule and rule.topic_id != selected_topic.id:
+                abort(404)
+            name = request.form.get("name", "").strip()[:180]
+            title = request.form.get("recommendation_title", "").strip()[:220]
+            recommendation_text = request.form.get("recommendation_text", "").strip()
+            min_severity = max(1, min(5, request.form.get("min_severity", 1, type=int)))
+            max_severity = max(1, min(5, request.form.get("max_severity", 5, type=int)))
+            priority = max(0, min(999, request.form.get("priority", 50, type=int)))
+            status = request.form.get("status", "draft")
+            if status not in {"draft", "published"}:
+                status = "draft"
+            allowed = {
+                "anger_patterns": {"explosion", "withdrawal", "crying", "arguing", "mixed"},
+                "triggers": {
+                    "direct_pressure",
+                    "sudden_change",
+                    "fatigue",
+                    "screen_limit",
+                    "criticism",
+                    "sibling_conflict",
+                },
+                "calming": {
+                    "quiet_space",
+                    "conversation",
+                    "movement",
+                    "time",
+                    "connection",
+                    "structured_choice",
+                },
+                "priorities": {"anger", "screen", "school", "motivation", "honesty", "friends"},
+                "styles": {"مقتدرانه", "مستبدانه", "سهل‌گیرانه"},
+                "previous_outcomes": {"helped", "neutral", "worsened", "not_done"},
+            }
+            conditions = {
+                key: [value for value in request.form.getlist(key) if value in values]
+                for key, values in allowed.items()
+            }
+            conditions = {key: value for key, value in conditions.items() if value}
+            relationship_min = request.form.get("relationship_score_min", type=int)
+            relationship_max = request.form.get("relationship_score_max", type=int)
+            if relationship_min is not None:
+                conditions["relationship_score_min"] = max(0, min(100, relationship_min))
+            if relationship_max is not None:
+                conditions["relationship_score_max"] = max(0, min(100, relationship_max))
+            errors = []
+            if len(name) < 3 or len(title) < 3 or len(recommendation_text) < 10:
+                errors.append("نام، عنوان و متن راهکار را کامل وارد کنید.")
+            if min_severity > max_severity:
+                errors.append("حداقل شدت نمی‌تواند از حداکثر بیشتر باشد.")
+            if (
+                relationship_min is not None
+                and relationship_max is not None
+                and relationship_min > relationship_max
+            ):
+                errors.append("بازه امتیاز رابطه معتبر نیست.")
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                if not rule:
+                    rule = PersonalizationRule(
+                        topic_id=selected_topic.id,
+                        created_by=current_user.id,
+                    )
+                    db.session.add(rule)
+                else:
+                    rule.version += 1
+                rule.name = name
+                rule.status = status
+                rule.priority = priority
+                rule.min_severity = min_severity
+                rule.max_severity = max_severity
+                rule.conditions_json = json.dumps(conditions, ensure_ascii=False)
+                rule.recommendation_title = title
+                rule.recommendation_text = recommendation_text
+                rule.reason_template = request.form.get("reason_template", "").strip()[:700]
+                rule.avoid_text = request.form.get("avoid_text", "").strip()
+                rule.home_action = request.form.get("home_action", "").strip()[:700]
+                rule.next_step_text = request.form.get("next_step_text", "").strip()[:700]
+                skill = db.session.get(
+                    SkillModule, request.form.get("skill_module_id", type=int)
+                )
+                rule.skill_module_id = skill.id if skill else None
+                db.session.commit()
+                flash(f"قاعده نسخه {rule.version} ذخیره شد.", "success")
+                return redirect(
+                    url_for("admin.personalization_rules", topic_id=selected_topic.id)
+                )
+        elif action == "archive_rule":
+            rule = db.session.get(
+                PersonalizationRule, request.form.get("rule_id", type=int)
+            )
+            if not rule:
+                abort(404)
+            rule.status = "archived"
+            rule.version += 1
+            db.session.commit()
+            flash("قاعده بایگانی شد؛ پیشنهادهای قبلی بدون تغییر باقی می‌مانند.", "info")
+            return redirect(url_for("admin.personalization_rules", topic_id=rule.topic_id))
+
+    rules = (
+        PersonalizationRule.query.filter_by(topic_id=selected_topic.id)
+        .order_by(PersonalizationRule.priority.desc(), PersonalizationRule.id)
+        .all()
+        if selected_topic
+        else []
+    )
+    edit_rule_id = request.args.get("edit_rule", type=int)
+    edit_rule = db.session.get(PersonalizationRule, edit_rule_id) if edit_rule_id else None
+    if edit_rule and (not selected_topic or edit_rule.topic_id != selected_topic.id):
+        edit_rule = None
+    skills = SkillModule.query.filter_by(is_published=True).order_by(SkillModule.sort_order).all()
+    stats = {
+        "published": PersonalizationRule.query.filter_by(status="published").count(),
+        "runs": RecommendationRun.query.count(),
+        "outcomes": HomeActionOutcome.query.count(),
+        "helped": HomeActionOutcome.query.filter_by(outcome="helped").count(),
+    }
+    return render_template(
+        "admin/personalization.html",
+        topics=topics,
+        selected_topic=selected_topic,
+        rules=rules,
+        edit_rule=edit_rule,
+        skills=skills,
+        stats=stats,
     )
 
 

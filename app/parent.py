@@ -10,11 +10,13 @@ from .models import (
     AssessmentInstrument,
     Child,
     ChildProfileSnapshot,
+    HomeActionOutcome,
     PaymentAllocation,
     ParentingAssessment,
     ParentingStyleAssessment,
     ProjectAuditLog,
     ProjectMembership,
+    RecommendationRun,
     ScenarioAttempt,
     ScenarioLevel,
     ScenarioTopic,
@@ -23,6 +25,7 @@ from .models import (
     SponsoredProject,
     utcnow,
 )
+from .recommendation_engine import build_personalized_recommendation
 
 
 bp = Blueprint("parent", __name__, url_prefix="/dashboard")
@@ -201,12 +204,18 @@ def dashboard():
     child_profile = latest_profile_snapshot(child.id, "initial") if child else None
     relationship_profile = latest_profile_snapshot(child.id, "relationship") if child else None
     style_result = None
+    latest_recommendation = None
     if child:
         style_result = (
             ParentingStyleAssessment.query.filter_by(
                 user_id=current_user.id, child_id=child.id
             )
             .order_by(ParentingStyleAssessment.created_at.desc())
+            .first()
+        )
+        latest_recommendation = (
+            RecommendationRun.query.filter_by(user_id=current_user.id, child_id=child.id)
+            .order_by(RecommendationRun.created_at.desc())
             .first()
         )
     return render_template(
@@ -218,6 +227,7 @@ def dashboard():
         child_profile=child_profile,
         relationship_profile=relationship_profile,
         style_result=style_result,
+        latest_recommendation=latest_recommendation,
     )
 
 
@@ -618,7 +628,32 @@ def scenario():
     level = None
     if selected_topic:
         level = ScenarioLevel.query.filter_by(topic_id=selected_topic, level=selected_level).first()
+    recommendation = build_personalized_recommendation(current_user.id, child, level) if level else None
     if request.method == "POST" and level:
+        action = request.form.get("action", "decision")
+        if action == "plan_recommendation" and recommendation:
+            rule = recommendation["rule"]
+            run = RecommendationRun(
+                user_id=current_user.id,
+                child_id=child.id,
+                topic_id=level.topic_id,
+                level_id=level.id,
+                rule_id=rule.id if rule else None,
+                rule_version=rule.version if rule else 0,
+                status="planned",
+                context_json=json.dumps(recommendation["context"], ensure_ascii=False),
+                title=recommendation["title"],
+                action_text=recommendation["action_text"],
+                reasons_json=json.dumps(recommendation["reasons"], ensure_ascii=False),
+                avoid_text=recommendation["avoid_text"],
+                home_action=recommendation["home_action"],
+                next_step_text=recommendation["next_step_text"],
+                skill_module_id=(recommendation["skill"].id if recommendation["skill"] else None),
+            )
+            db.session.add(run)
+            db.session.commit()
+            flash(f"برنامه موقعیت برای {child.name} ذخیره شد؛ بعد از اجرا نتیجه را ثبت کنید.", "success")
+            return redirect(url_for("parent.recommendation_detail", recommendation_id=run.id))
         db.session.add(
             ScenarioAttempt(
                 user_id=current_user.id,
@@ -635,5 +670,75 @@ def scenario():
         selected_topic=selected_topic,
         selected_level=selected_level,
         level=level,
+        recommendation=recommendation,
+    )
+
+
+@bp.get("/recommendations")
+@login_required
+def recommendations():
+    child = owned_child()
+    if not child:
+        return redirect(url_for("parent.children"))
+    items = RecommendationRun.query.filter_by(
+        user_id=current_user.id, child_id=child.id
+    ).order_by(RecommendationRun.created_at.desc()).all()
+    return render_template("parent/recommendations.html", child=child, recommendations=items)
+
+
+@bp.route("/recommendations/<int:recommendation_id>", methods=["GET", "POST"])
+@login_required
+def recommendation_detail(recommendation_id):
+    recommendation = db.session.get(RecommendationRun, recommendation_id)
+    if not recommendation or recommendation.user_id != current_user.id:
+        abort(404)
+    child = owned_child(recommendation.child_id)
+    if request.method == "POST":
+        outcome_value = request.form.get("outcome", "")
+        child_response = request.form.get("child_response", "")
+        helpfulness = request.form.get("helpfulness", type=int)
+        if outcome_value not in {"helped", "neutral", "worsened", "not_done"}:
+            flash("نتیجه اقدام را انتخاب کنید.", "danger")
+        elif child_response not in {
+            "calmer",
+            "cooperative",
+            "no_change",
+            "withdrawn",
+            "escalated",
+            "not_recorded",
+        }:
+            flash("واکنش فرزند معتبر نیست.", "danger")
+        elif helpfulness not in range(1, 6):
+            flash("میزان کمک‌کنندگی را از ۱ تا ۵ مشخص کنید.", "danger")
+        else:
+            outcome = recommendation.outcome or HomeActionOutcome(
+                recommendation_id=recommendation.id
+            )
+            outcome.outcome = outcome_value
+            outcome.child_response = child_response
+            outcome.helpfulness = helpfulness
+            outcome.parent_note = request.form.get("parent_note", "").strip()[:1200]
+            if not recommendation.outcome:
+                db.session.add(outcome)
+            recommendation.status = "completed" if outcome_value != "not_done" else "skipped"
+            recommendation.completed_at = utcnow()
+            db.session.commit()
+            flash("نتیجه اقدام ثبت شد و در پیشنهاد بعدی اثر می‌گذارد.", "success")
+            return redirect(
+                url_for("parent.recommendation_detail", recommendation_id=recommendation.id)
+            )
+    outcome_guidance = None
+    if recommendation.outcome:
+        outcome_guidance = {
+            "helped": "این مسیر کمک‌کننده بوده است؛ در نوبت بعد همان اصل را با ثبات ادامه دهید.",
+            "neutral": "اثر روشن نبوده است؛ اقدام بعدی را کوچک‌تر و زمان اجرای آن را مناسب‌تر کنید.",
+            "worsened": "این مداخله را عیناً تکرار نکنید؛ پیشنهاد بعدی با شدت کمتر و تمرکز بر کاهش تنش ساخته می‌شود.",
+            "not_done": "مانع اجرا را بررسی و یک اقدام کوچک‌تر انتخاب کنید.",
+        }.get(recommendation.outcome.outcome)
+    return render_template(
+        "parent/recommendation_detail.html",
+        child=child,
+        recommendation=recommendation,
+        outcome_guidance=outcome_guidance,
     )
 

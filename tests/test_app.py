@@ -6,12 +6,15 @@ from app.models import (
     AssessmentQuestion,
     Child,
     ChildProfileSnapshot,
+    HomeActionOutcome,
     Organization,
     ParentingAssessment,
     ParentingStyleAssessment,
     PaymentAllocation,
     ProjectAuditLog,
     ProjectMembership,
+    RecommendationRun,
+    ScenarioTopic,
     SponsoredProject,
     User,
 )
@@ -332,4 +335,112 @@ def test_baumrind_cannot_publish_without_scientific_gate(client, app):
     with app.app_context():
         assert AssessmentInstrument.query.one().status == "draft"
         assert AssessmentQuestion.query.count() == 0
+
+
+def scenario_topic_id(app, slug="anger"):
+    with app.app_context():
+        return ScenarioTopic.query.filter_by(slug=slug).one().id
+
+
+def add_child_with_profile(client, name, anger_pattern):
+    client.post(
+        "/dashboard/children",
+        data={"name": name, "birth_year": "1392", "gender": "girl"},
+    )
+    payload = initial_profile_payload()
+    payload["anger_pattern"] = anger_pattern
+    response = client.post("/dashboard/child-profile", data=payload)
+    assert response.status_code == 302
+
+
+def test_same_situation_is_personalized_for_each_child(client, app):
+    login(client)
+    topic_id = scenario_topic_id(app)
+
+    add_child_with_profile(client, "سارا", "withdrawal")
+    sara_page = client.get(f"/dashboard/scenario?topic_id={topic_id}&level=2")
+    assert sara_page.status_code == 200
+    assert "فضا بدهید، اما زمان بازگشت را روشن کنید" in sara_page.get_data(as_text=True)
+
+    add_child_with_profile(client, "علی", "explosion")
+    ali_page = client.get(f"/dashboard/scenario?topic_id={topic_id}&level=2")
+    assert ali_page.status_code == 200
+    assert "کلمات کمتر، مرز ایمنی روشن‌تر" in ali_page.get_data(as_text=True)
+
+
+def test_negative_outcome_changes_the_next_recommendation(client, app):
+    login(client)
+    topic_id = scenario_topic_id(app)
+    add_child_with_profile(client, "سارا", "withdrawal")
+
+    response = client.post(
+        "/dashboard/scenario",
+        data={
+            "topic_id": topic_id,
+            "level": 2,
+            "action": "plan_recommendation",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        run = RecommendationRun.query.one()
+        run_id = run.id
+        assert run.context["child_name"] == "سارا"
+        assert run.rule_version == 1
+
+    response = client.post(
+        f"/dashboard/recommendations/{run_id}",
+        data={
+            "outcome": "worsened",
+            "child_response": "escalated",
+            "helpfulness": "1",
+            "parent_note": "تنش بیشتر شد.",
+        },
+    )
+    assert response.status_code == 302
+    next_page = client.get(f"/dashboard/scenario?topic_id={topic_id}&level=2")
+    assert "شدت مداخله را کمتر کنید" in next_page.get_data(as_text=True)
+    with app.app_context():
+        assert HomeActionOutcome.query.one().outcome == "worsened"
+        assert RecommendationRun.query.one().status == "completed"
+
+
+def test_high_severity_prioritizes_safety(client, app):
+    login(client)
+    client.post(
+        "/dashboard/children",
+        data={"name": "زهرا", "birth_year": "1391", "gender": "girl"},
+    )
+    topic_id = scenario_topic_id(app, "screen-time")
+    page = client.get(f"/dashboard/scenario?topic_id={topic_id}&level=5")
+    assert page.status_code == 200
+    assert "اول ایمنی و کاهش تنش" in page.get_data(as_text=True)
+
+
+def test_recommendation_is_isolated_between_parents(client, app):
+    login(client)
+    topic_id = scenario_topic_id(app)
+    add_child_with_profile(client, "سارا", "withdrawal")
+    client.post(
+        "/dashboard/scenario",
+        data={"topic_id": topic_id, "level": 2, "action": "plan_recommendation"},
+    )
+    with app.app_context():
+        run_id = RecommendationRun.query.one().id
+        second = User(full_name="والد دوم", mobile="09120000003", role="parent")
+        second.set_password("ParentPass123")
+        db.session.add(second)
+        db.session.commit()
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="ParentPass123")
+    assert client.get(f"/dashboard/recommendations/{run_id}").status_code == 404
+
+
+def test_admin_can_manage_personalization_rules(client):
+    login(client, mobile="09120000001", password="AdminPass123")
+    page = client.get("/admin/personalization")
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "شخصی‌سازی توضیح‌پذیر" in body
+    assert "ساخت مسیر شخصی‌سازی" in body
 

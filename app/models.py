@@ -458,3 +458,122 @@ class ChildProfileSnapshot(db.Model):
         except (TypeError, ValueError):
             return {}
 
+
+class PersonalizationRule(db.Model):
+    __tablename__ = "personalization_rules"
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True
+    )
+    name = db.Column(db.String(180), nullable=False)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    priority = db.Column(db.Integer, nullable=False, default=50, index=True)
+    min_severity = db.Column(db.Integer, nullable=False, default=1)
+    max_severity = db.Column(db.Integer, nullable=False, default=5)
+    conditions_json = db.Column(db.Text, nullable=False, default="{}")
+    recommendation_title = db.Column(db.String(220), nullable=False)
+    recommendation_text = db.Column(db.Text, nullable=False)
+    reason_template = db.Column(db.String(700), nullable=False, default="")
+    avoid_text = db.Column(db.Text, nullable=False, default="")
+    home_action = db.Column(db.String(700), nullable=False, default="")
+    next_step_text = db.Column(db.String(700), nullable=False, default="")
+    skill_module_id = db.Column(
+        db.Integer, db.ForeignKey("skill_modules.id"), nullable=True, index=True
+    )
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    topic = db.relationship("ScenarioTopic")
+    skill = db.relationship("SkillModule")
+
+    @property
+    def conditions(self):
+        try:
+            value = json.loads(self.conditions_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def is_published(self):
+        return self.status == "published"
+
+
+class RecommendationRun(db.Model):
+    __tablename__ = "recommendation_runs"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True
+    )
+    level_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_levels.id"), nullable=False, index=True
+    )
+    rule_id = db.Column(
+        db.Integer, db.ForeignKey("personalization_rules.id"), nullable=True, index=True
+    )
+    rule_version = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="planned", index=True)
+    context_json = db.Column(db.Text, nullable=False, default="{}")
+    title = db.Column(db.String(220), nullable=False)
+    action_text = db.Column(db.Text, nullable=False)
+    reasons_json = db.Column(db.Text, nullable=False, default="[]")
+    avoid_text = db.Column(db.Text, nullable=False, default="")
+    home_action = db.Column(db.String(700), nullable=False, default="")
+    next_step_text = db.Column(db.String(700), nullable=False, default="")
+    skill_module_id = db.Column(db.Integer, db.ForeignKey("skill_modules.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    child = db.relationship("Child")
+    topic = db.relationship("ScenarioTopic")
+    level = db.relationship("ScenarioLevel")
+    rule = db.relationship("PersonalizationRule")
+    skill = db.relationship("SkillModule")
+    outcome = db.relationship(
+        "HomeActionOutcome",
+        backref="recommendation",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def context(self):
+        try:
+            return json.loads(self.context_json or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def reasons(self):
+        try:
+            value = json.loads(self.reasons_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+
+class HomeActionOutcome(db.Model):
+    __tablename__ = "home_action_outcomes"
+    id = db.Column(db.Integer, primary_key=True)
+    recommendation_id = db.Column(
+        db.Integer,
+        db.ForeignKey("recommendation_runs.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    outcome = db.Column(db.String(20), nullable=False, index=True)
+    child_response = db.Column(db.String(30), nullable=False, default="not_recorded")
+    helpfulness = db.Column(db.Integer, nullable=False, default=3)
+    parent_note = db.Column(db.String(1200), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
