@@ -4,6 +4,9 @@ from app.extensions import db
 from app.models import (
     AssessmentInstrument,
     AssessmentQuestion,
+    AssistantConversation,
+    AssistantFeedback,
+    AssistantMessage,
     Child,
     ChildProfileSnapshot,
     DailyAction,
@@ -17,6 +20,7 @@ from app.models import (
     ProjectMembership,
     PlanReview,
     RecommendationRun,
+    SafetyProtocol,
     ScenarioTopic,
     SkillDomain,
     SkillProgress,
@@ -96,6 +100,7 @@ def test_admin_can_open_builders(client):
     assert client.get("/admin/projects").status_code == 200
     assert client.get("/admin/assessments/baumrind").status_code == 200
     assert client.get("/admin/learning-path").status_code == 200
+    assert client.get("/admin/assistant-control").status_code == 200
 
 
 def create_sponsored_project(client, capacity="10", budget="7000000"):
@@ -623,4 +628,139 @@ def test_admin_can_version_a_micro_lesson(client, app):
     assert second.status_code == 302
     with app.app_context():
         assert db.session.get(MicroLesson, lesson_id).version == 2
+
+
+def create_assistant_child(client, name="سارا"):
+    client.post(
+        "/dashboard/children",
+        data={"name": name, "birth_year": "1392", "gender": "girl"},
+    )
+
+
+def assistant_post(client, message, conversation_id=None):
+    data = {"message": message}
+    if conversation_id:
+        data["conversation_id"] = str(conversation_id)
+    return client.post("/dashboard/assistant", data=data)
+
+
+def test_safety_protocols_are_seeded_and_published(app):
+    with app.app_context():
+        assert SafetyProtocol.query.filter_by(status="published").count() == 3
+        protocol = SafetyProtocol.query.filter_by(slug="immediate-harm-risk").one()
+        assert "خودکشی" in protocol.trigger_keywords
+        assert len(protocol.immediate_steps) >= 3
+
+
+def test_assistant_grounded_answer_has_sources_and_child_context(client, app):
+    login(client)
+    create_assistant_child(client)
+    response = assistant_post(client, "سارا وقتی عصبانی می‌شود داد می‌زند؛ چه کار کنم؟")
+    assert response.status_code == 302
+    with app.app_context():
+        conversation = AssistantConversation.query.one()
+        answer = AssistantMessage.query.filter_by(role="assistant").one()
+        conversation_id = conversation.id
+        assert answer.decision_type == "grounded"
+        assert answer.topic.slug == "anger"
+        assert answer.sources
+        assert answer.context["child_name"] == "سارا"
+        assert "برای موقعیت «خشم و پرخاشگری» با سارا" in answer.body
+    page = client.get(f"/dashboard/assistant?conversation_id={conversation_id}")
+    assert page.status_code == 200
+    assert "پاسخ منبع‌دار" in page.get_data(as_text=True)
+
+
+def test_assistant_stops_on_immediate_safety_risk(client, app):
+    login(client)
+    create_assistant_child(client)
+    assistant_post(client, "فرزندم درباره خودکشی حرف می‌زند و چاقو برداشته است")
+    with app.app_context():
+        answer = AssistantMessage.query.filter_by(role="assistant").one()
+        assert answer.decision_type == "safety"
+        assert answer.sources[0]["kind"] == "safety_protocol"
+        assert "خدمات اضطراری محل زندگی" in answer.body
+        assert "شماره تماس حدس نمی‌زنم" in answer.body
+
+
+def test_assistant_refuses_diagnosis_and_prescription(client, app):
+    login(client)
+    create_assistant_child(client)
+    assistant_post(client, "برای تشخیص بیماری و دوز دارو چه پیشنهادی دارید؟")
+    with app.app_context():
+        answer = AssistantMessage.query.filter_by(role="assistant").one()
+        assert answer.decision_type == "out_of_scope"
+        assert "نمی‌توانم دارو" in answer.body
+        assert answer.sources == []
+
+
+def test_assistant_uses_active_weekly_plan_as_source(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    assistant_post(client, "وقتی سارا خشمگین می‌شود امروز چه تمرینی انجام بدهم؟")
+    with app.app_context():
+        answer = AssistantMessage.query.filter_by(role="assistant").one()
+        plan = db.session.get(WeeklyPlan, plan_id)
+        assert plan.current_action.title in answer.body
+        assert any(source["kind"] == "weekly_plan" for source in answer.sources)
+        assert answer.context["active_plan_id"] == plan_id
+
+
+def test_assistant_conversation_and_feedback_are_isolated(client, app):
+    login(client)
+    create_assistant_child(client)
+    assistant_post(client, "درباره عصبانیت سارا چه کار کنم؟")
+    with app.app_context():
+        conversation_id = AssistantConversation.query.one().id
+        message_id = AssistantMessage.query.filter_by(role="assistant").one().id
+        second = User(full_name="والد دوم", mobile="09120000003", role="parent")
+        second.set_password("ParentPass123")
+        db.session.add(second)
+        db.session.commit()
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="ParentPass123")
+    create_assistant_child(client, "علی")
+    assert client.get(
+        f"/dashboard/assistant?conversation_id={conversation_id}"
+    ).status_code == 404
+    assert client.post(
+        f"/dashboard/assistant/messages/{message_id}/feedback",
+        data={"helpful": "yes"},
+    ).status_code == 404
+
+
+def test_parent_feedback_and_admin_protocol_versioning(client, app):
+    login(client)
+    create_assistant_child(client)
+    assistant_post(client, "برای زمان موبایل چه مرزی بگذارم؟")
+    with app.app_context():
+        message_id = AssistantMessage.query.filter_by(role="assistant").one().id
+    response = client.post(
+        f"/dashboard/assistant/messages/{message_id}/feedback",
+        data={"helpful": "yes", "note": "کوتاه و قابل اجرا بود."},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        assert AssistantFeedback.query.one().helpful is True
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    with app.app_context():
+        protocol = SafetyProtocol.query.filter_by(slug="immediate-harm-risk").one()
+        protocol_id = protocol.id
+        payload = {
+            "action": "save_protocol",
+            "protocol_id": str(protocol.id),
+            "title": protocol.title,
+            "slug": protocol.slug,
+            "priority": str(protocol.priority),
+            "trigger_keywords": "\n".join(protocol.trigger_keywords),
+            "response_title": protocol.response_title,
+            "response_text": protocol.response_text,
+            "immediate_steps": "\n".join(protocol.immediate_steps),
+            "status": "published",
+        }
+    update = client.post("/admin/assistant-control", data=payload)
+    assert update.status_code == 302
+    with app.app_context():
+        assert db.session.get(SafetyProtocol, protocol_id).version == 2
 

@@ -248,6 +248,115 @@ class PlanReview(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class SafetyProtocol(db.Model):
+    __tablename__ = "safety_protocols"
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    trigger_keywords_json = db.Column(db.Text, nullable=False, default="[]")
+    response_title = db.Column(db.String(220), nullable=False)
+    response_text = db.Column(db.Text, nullable=False)
+    immediate_steps_json = db.Column(db.Text, nullable=False, default="[]")
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    priority = db.Column(db.Integer, nullable=False, default=100)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    @property
+    def trigger_keywords(self):
+        try:
+            value = json.loads(self.trigger_keywords_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def immediate_steps(self):
+        try:
+            value = json.loads(self.immediate_steps_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+
+class AssistantConversation(db.Model):
+    __tablename__ = "assistant_conversations"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False, default="گفت‌وگوی تازه")
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    child = db.relationship("Child")
+    messages = db.relationship(
+        "AssistantMessage",
+        backref="conversation",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="AssistantMessage.created_at",
+    )
+
+
+class AssistantMessage(db.Model):
+    __tablename__ = "assistant_messages"
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(
+        db.Integer, db.ForeignKey("assistant_conversations.id"), nullable=False, index=True
+    )
+    role = db.Column(db.String(20), nullable=False, index=True)
+    body = db.Column(db.Text, nullable=False)
+    decision_type = db.Column(db.String(30), nullable=False, default="user", index=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey("scenario_topics.id"), nullable=True)
+    sources_json = db.Column(db.Text, nullable=False, default="[]")
+    context_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    topic = db.relationship("ScenarioTopic")
+    feedback = db.relationship(
+        "AssistantFeedback", backref="message", uselist=False, cascade="all, delete-orphan"
+    )
+
+    @property
+    def sources(self):
+        try:
+            value = json.loads(self.sources_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def context(self):
+        try:
+            value = json.loads(self.context_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+
+class AssistantFeedback(db.Model):
+    __tablename__ = "assistant_feedback"
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(
+        db.Integer,
+        db.ForeignKey("assistant_messages.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    helpful = db.Column(db.Boolean, nullable=False)
+    note = db.Column(db.String(700), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class ScenarioTopic(db.Model):
     __tablename__ = "scenario_topics"
     id = db.Column(db.Integer, primary_key=True)

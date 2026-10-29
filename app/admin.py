@@ -11,6 +11,9 @@ from .extensions import db
 from .models import (
     AssessmentInstrument,
     AssessmentQuestion,
+    AssistantConversation,
+    AssistantFeedback,
+    AssistantMessage,
     Child,
     ChildProfileSnapshot,
     DailyAction,
@@ -25,6 +28,7 @@ from .models import (
     ProjectMembership,
     ScenarioLevel,
     ScenarioTopic,
+    SafetyProtocol,
     SkillModule,
     SponsoredProject,
     User,
@@ -539,6 +543,110 @@ def learning_path():
         modules=modules,
         lessons=lessons,
         edit_lesson=edit_lesson,
+        stats=stats,
+    )
+
+
+@bp.route("/assistant-control", methods=["GET", "POST"])
+@login_required
+@admin_required
+def assistant_control():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_protocol":
+            protocol_id = request.form.get("protocol_id", type=int)
+            protocol = db.session.get(SafetyProtocol, protocol_id) if protocol_id else None
+            title = request.form.get("title", "").strip()[:180]
+            slug = make_slug(request.form.get("slug", ""))[:100]
+            response_title = request.form.get("response_title", "").strip()[:220]
+            response_text = request.form.get("response_text", "").strip()
+            status = request.form.get("status", "draft")
+            priority = max(0, min(999, request.form.get("priority", 100, type=int)))
+            keywords = [
+                item.strip()
+                for item in re.split(r"[,،\n]+", request.form.get("trigger_keywords", ""))
+                if item.strip()
+            ]
+            steps = [
+                item.strip()
+                for item in request.form.get("immediate_steps", "").splitlines()
+                if item.strip()
+            ]
+            duplicate = SafetyProtocol.query.filter_by(slug=slug).first()
+            errors = []
+            if len(title) < 3 or len(response_title) < 3 or len(response_text) < 30:
+                errors.append("عنوان و متن پاسخ ایمنی را کامل وارد کنید.")
+            if not keywords or not steps:
+                errors.append("دست‌کم یک کلیدواژه و یک قدم فوری لازم است.")
+            if duplicate and (not protocol or duplicate.id != protocol.id):
+                errors.append("شناسه پروتکل تکراری است.")
+            if status not in {"draft", "published"}:
+                status = "draft"
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                if not protocol:
+                    protocol = SafetyProtocol(slug=slug, created_by=current_user.id)
+                    db.session.add(protocol)
+                else:
+                    protocol.version += 1
+                protocol.slug = slug
+                protocol.title = title
+                protocol.response_title = response_title
+                protocol.response_text = response_text
+                protocol.trigger_keywords_json = json.dumps(keywords, ensure_ascii=False)
+                protocol.immediate_steps_json = json.dumps(steps, ensure_ascii=False)
+                protocol.priority = priority
+                protocol.status = status
+                db.session.commit()
+                flash(f"پروتکل نسخه {protocol.version} ذخیره شد.", "success")
+                return redirect(url_for("admin.assistant_control"))
+        elif action == "archive_protocol":
+            protocol = db.session.get(
+                SafetyProtocol, request.form.get("protocol_id", type=int)
+            )
+            if not protocol:
+                abort(404)
+            protocol.status = "archived"
+            protocol.version += 1
+            db.session.commit()
+            flash("پروتکل بایگانی شد.", "info")
+            return redirect(url_for("admin.assistant_control"))
+
+    protocols = SafetyProtocol.query.order_by(
+        SafetyProtocol.priority.desc(), SafetyProtocol.id
+    ).all()
+    edit_protocol_id = request.args.get("edit_protocol", type=int)
+    edit_protocol = (
+        db.session.get(SafetyProtocol, edit_protocol_id) if edit_protocol_id else None
+    )
+    recent_messages = (
+        AssistantMessage.query.filter_by(role="assistant")
+        .order_by(AssistantMessage.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    stats = {
+        "conversations": AssistantConversation.query.count(),
+        "answers": AssistantMessage.query.filter_by(role="assistant").count(),
+        "grounded": AssistantMessage.query.filter_by(
+            role="assistant", decision_type="grounded"
+        ).count(),
+        "safety": AssistantMessage.query.filter_by(
+            role="assistant", decision_type="safety"
+        ).count(),
+        "refused": AssistantMessage.query.filter(
+            AssistantMessage.role == "assistant",
+            AssistantMessage.decision_type.in_(["out_of_scope", "policy_boundary"]),
+        ).count(),
+        "helpful": AssistantFeedback.query.filter_by(helpful=True).count(),
+    }
+    return render_template(
+        "admin/assistant_control.html",
+        protocols=protocols,
+        edit_protocol=edit_protocol,
+        recent_messages=recent_messages,
         stats=stats,
     )
 

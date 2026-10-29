@@ -7,6 +7,7 @@ from .models import (
     PersonalizationRule,
     ScenarioLevel,
     ScenarioTopic,
+    SafetyProtocol,
     SkillDomain,
     SkillDomainMembership,
     SkillModule,
@@ -72,6 +73,37 @@ MICRO_LESSONS = [
 ]
 
 
+SAFETY_PROTOCOLS = [
+    (
+        "immediate-harm-risk",
+        "خطر فوری آسیب به خود یا دیگری",
+        ["خودکشی", "خودکشی می", "خودزنی", "آسیب به خود", "می‌کشم", "میکشم", "بکشم", "کشتن", "چاقو", "اسلحه", "تهدید جدی"],
+        "الان ایمنی از آموزش مهم‌تر است",
+        "در این وضعیت ادامه گفت‌وگوی آموزشی کافی نیست. اگر خطر فوری یا ابزار آسیب وجود دارد، فرزند را تنها نگذارید، فاصله امن ایجاد کنید و همین حالا از خدمات اضطراری محل زندگی یا یک متخصص حضوری کمک بگیرید.",
+        ["بحث و سرزنش را متوقف کنید.", "ابزار آسیب را فقط در صورت امن‌بودن از دسترس دور کنید.", "یک بزرگسال امن دیگر را در جریان بگذارید.", "برای کمک حضوری فوری اقدام کنید."],
+        300,
+    ),
+    (
+        "violence-abuse-risk",
+        "خشونت یا آزار جدی",
+        ["کتک شدید", "آزار جنسی", "تجاوز", "حبس", "شکنجه", "فرار از خانه", "امن نیست", "کتکم می‌زند", "من را می‌زند"],
+        "این موضوع به حمایت تخصصی و ایمنی نیاز دارد",
+        "این نشانه‌ها فراتر از یک تمرین والدگری روزمره‌اند. ابتدا امنیت کودک یا نوجوان را تأمین کنید و برای ارزیابی حضوری از خدمات حمایتی، متخصص واجد صلاحیت یا خدمات اضطراری محل زندگی کمک بگیرید.",
+        ["کودک را برای توضیح فوری تحت فشار نگذارید.", "موضوع را محرمانه اما بدون پنهان‌کردن خطر ثبت کنید.", "با فرد یا مرکز حمایت‌کننده معتبر تماس بگیرید."],
+        250,
+    ),
+    (
+        "medical-emergency",
+        "فوریت پزشکی یا روان‌پزشکی",
+        ["بیهوش", "تشنج", "اوردوز", "مصرف قرص", "توهم شدید", "نفس نمی", "مسموم"],
+        "برای فوریت پزشکی اقدام کنید",
+        "این سامانه برای ارزیابی فوریت پزشکی طراحی نشده است. منتظر پاسخ آنلاین نمانید و با خدمات اضطراری محل زندگی یا نزدیک‌ترین مرکز درمانی تماس بگیرید.",
+        ["وضعیت تنفس و هوشیاری را بررسی کنید.", "اطلاعات ماده یا داروی مصرف‌شده را نگه دارید.", "راهنمایی اپراتور خدمات اضطراری را دنبال کنید."],
+        280,
+    ),
+]
+
+
 def seed_content():
     if not AssessmentInstrument.query.filter_by(framework_slug="baumrind").first():
         db.session.add(
@@ -99,6 +131,22 @@ def seed_content():
                 ),
             )
         )
+
+    if SafetyProtocol.query.count() == 0:
+        for item in SAFETY_PROTOCOLS:
+            slug, title, keywords, response_title, response_text, steps, priority = item
+            db.session.add(
+                SafetyProtocol(
+                    slug=slug,
+                    title=title,
+                    trigger_keywords_json=json.dumps(keywords, ensure_ascii=False),
+                    response_title=response_title,
+                    response_text=response_text,
+                    immediate_steps_json=json.dumps(steps, ensure_ascii=False),
+                    status="published",
+                    priority=priority,
+                )
+            )
 
     if SkillModule.query.count() == 0:
         for order, item in enumerate(SKILLS, 1):

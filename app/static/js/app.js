@@ -33,6 +33,13 @@
     $(this).addClass("active").siblings().removeClass("active");
   });
 
+  $(document).on("click", "[data-assistant-prompt]", function () {
+    const input = document.getElementById("assistantMessage");
+    if (!input) return;
+    input.value = this.dataset.assistantPrompt || "";
+    input.focus();
+  });
+
   $(document).on("click", ".response-card", function () {
     $(this).addClass("selected").siblings().removeClass("selected");
     const icon = $(this).hasClass("good") ? "fa-circle-check" : ($(this).hasClass("wrong") ? "fa-triangle-exclamation" : "fa-circle-info");

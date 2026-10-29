@@ -7,6 +7,9 @@ from flask_login import current_user, login_required
 
 from .extensions import db
 from .models import (
+    AssistantConversation,
+    AssistantFeedback,
+    AssistantMessage,
     AssessmentInstrument,
     Child,
     ChildProfileSnapshot,
@@ -28,6 +31,7 @@ from .models import (
     WeeklyPlan,
     utcnow,
 )
+from .assistant_engine import build_assistant_response
 from .learning_path import build_weekly_plan, suggested_topic_for_child
 from .recommendation_engine import build_personalized_recommendation
 
@@ -689,6 +693,123 @@ def scenario():
         selected_level=selected_level,
         level=level,
         recommendation=recommendation,
+    )
+
+
+@bp.route("/assistant", methods=["GET", "POST"])
+@login_required
+def assistant():
+    child = owned_child()
+    if not child:
+        flash("ابتدا پرونده یک فرزند را بسازید.", "warning")
+        return redirect(url_for("parent.children"))
+    conversation = None
+    conversation_id = request.values.get("conversation_id", type=int)
+    if conversation_id:
+        conversation = db.session.get(AssistantConversation, conversation_id)
+        if (
+            not conversation
+            or conversation.user_id != current_user.id
+            or conversation.child_id != child.id
+        ):
+            abort(404)
+    elif not request.args.get("new"):
+        conversation = (
+            AssistantConversation.query.filter_by(
+                user_id=current_user.id, child_id=child.id, status="active"
+            )
+            .order_by(AssistantConversation.updated_at.desc())
+            .first()
+        )
+    if request.method == "POST":
+        message_text = request.form.get("message", "").strip()
+        if not 3 <= len(message_text) <= 2000:
+            flash("پیام باید بین ۳ تا ۲۰۰۰ نویسه باشد.", "danger")
+            return redirect(
+                url_for(
+                    "parent.assistant",
+                    conversation_id=conversation.id if conversation else None,
+                )
+            )
+        if not conversation:
+            conversation = AssistantConversation(
+                user_id=current_user.id,
+                child_id=child.id,
+                title=message_text[:70],
+            )
+            db.session.add(conversation)
+            db.session.flush()
+        db.session.add(
+            AssistantMessage(
+                conversation_id=conversation.id,
+                role="user",
+                body=message_text,
+                decision_type="user",
+                context_json=json.dumps(
+                    {"child_id": child.id, "child_name": child.name}, ensure_ascii=False
+                ),
+            )
+        )
+        result = build_assistant_response(current_user.id, child, message_text)
+        db.session.add(
+            AssistantMessage(
+                conversation_id=conversation.id,
+                role="assistant",
+                body=result["body"],
+                decision_type=result["decision_type"],
+                topic_id=result["topic"].id if result["topic"] else None,
+                sources_json=json.dumps(result["sources"], ensure_ascii=False),
+                context_json=json.dumps(result["context"], ensure_ascii=False),
+            )
+        )
+        conversation.updated_at = utcnow()
+        db.session.commit()
+        return redirect(
+            url_for("parent.assistant", conversation_id=conversation.id, _anchor="latest")
+        )
+    conversations = (
+        AssistantConversation.query.filter_by(user_id=current_user.id, child_id=child.id)
+        .order_by(AssistantConversation.updated_at.desc())
+        .limit(20)
+        .all()
+    )
+    return render_template(
+        "parent/assistant.html",
+        child=child,
+        conversation=conversation,
+        conversations=conversations,
+    )
+
+
+@bp.post("/assistant/messages/<int:message_id>/feedback")
+@login_required
+def assistant_feedback(message_id):
+    message = db.session.get(AssistantMessage, message_id)
+    if (
+        not message
+        or message.role != "assistant"
+        or message.conversation.user_id != current_user.id
+    ):
+        abort(404)
+    owned_child(message.conversation.child_id)
+    value = request.form.get("helpful")
+    if value not in {"yes", "no"}:
+        abort(400)
+    feedback = message.feedback or AssistantFeedback(
+        message_id=message.id, user_id=current_user.id
+    )
+    feedback.helpful = value == "yes"
+    feedback.note = request.form.get("note", "").strip()[:700]
+    if not message.feedback:
+        db.session.add(feedback)
+    db.session.commit()
+    flash("بازخورد شما برای بازبینی کیفیت ثبت شد.", "success")
+    return redirect(
+        url_for(
+            "parent.assistant",
+            conversation_id=message.conversation_id,
+            _anchor=f"message-{message.id}",
+        )
     )
 
 
