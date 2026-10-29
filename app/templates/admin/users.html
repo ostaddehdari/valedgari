@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}کاربران | مدیریت والدیار{% endblock %}
+{% block body_class %}admin-page{% endblock %}
+{% block content %}
+<section class="page-header dark"><div class="container"><span class="eyebrow light">مدیریت کاربران</span><h1>والدین و پرونده‌های خانواده</h1><p>نمایش امن اطلاعات پایه حساب‌ها و تعداد فرزندان.</p></div></section><div class="container section-pad-sm"><div class="panel-card table-responsive"><table class="table align-middle admin-table"><thead><tr><th>کاربر</th><th>شماره موبایل</th><th>نقش</th><th>فرزندان</th><th>تاریخ عضویت</th></tr></thead><tbody>{% for user in pagination.items %}<tr><td><span class="avatar-sm d-inline-flex">{{ user.full_name[:1] }}</span> {{ user.full_name }}</td><td dir="ltr" class="text-end">{{ user.mobile }}</td><td><span class="role-badge {{ user.role }}">{{ 'مدیر' if user.is_admin else 'والد' }}</span></td><td>{{ user.children|length }}</td><td>{{ user.created_at.strftime('%Y-%m-%d') }}</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
+

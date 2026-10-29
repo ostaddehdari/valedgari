@@ -1,0 +1,21 @@
+[Unit]
+Description=Valedgari Flask Application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/valedgari
+EnvironmentFile=/etc/valedgari.env
+ExecStart=/var/www/valedgari/.venv/bin/gunicorn --workers 3 --threads 2 --timeout 60 --bind 127.0.0.1:8010 --access-logfile - --error-logfile - wsgi:app
+Restart=always
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/www/valedgari/instance
+
+[Install]
+WantedBy=multi-user.target
+

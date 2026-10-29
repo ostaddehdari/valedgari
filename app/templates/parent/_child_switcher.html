@@ -1,0 +1,11 @@
+<div class="child-switcher">
+  <span class="small text-muted">مسیر فعال:</span>
+  {% for item in current_user.children %}
+    <form action="{{ url_for('parent.activate_child', child_id=item.id) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="child-pill {% if child and item.id == child.id %}active{% endif %}" type="submit"><span>{{ item.name[:1] }}</span>{{ item.name }}</button>
+    </form>
+  {% endfor %}
+  <a class="child-pill add" href="{{ url_for('parent.children') }}"><i class="fa-solid fa-plus"></i> فرزند</a>
+</div>
+

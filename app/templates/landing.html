@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}والدیار | راهنمای عملی والد و نوجوان{% endblock %}
+{% block body_class %}landing-page{% endblock %}
+{% block content %}
+<section class="hero-section overflow-hidden">
+  <div class="hero-orb orb-one"></div><div class="hero-orb orb-two"></div>
+  <div class="container position-relative">
+    <div class="row align-items-center min-vh-75 g-5">
+      <div class="col-lg-6" data-animate="animate__fadeInRight">
+        <div class="eyebrow"><i class="fa-solid fa-sparkles"></i> والدگری آگاهانه، قدم‌به‌قدم</div>
+        <h1>قبل از واکنش،<br><span>راه درست را تمرین کن.</span></h1>
+        <p class="hero-lead">والدیار به شما کمک می‌کند سبک والدگری خود را بشناسید، مهارت‌های ارتباطی را تمرین کنید و برای موقعیت‌های واقعی نوجوان، پاسخ سنجیده‌تری بسازید.</p>
+        <div class="d-flex flex-wrap gap-3 mt-4">
+          <a class="btn btn-primary-custom btn-lg" href="{{ url_for('auth.register') }}"><i class="fa-solid fa-arrow-left ms-2"></i>شروع مسیر خانواده من</a>
+          <a class="btn btn-outline-custom btn-lg" href="#situations"><i class="fa-regular fa-circle-play ms-2"></i>دیدن یک موقعیت نمونه</a>
+        </div>
+        <div class="trust-row">
+          <span><i class="fa-solid fa-check"></i> بدون کد تأیید</span>
+          <span><i class="fa-solid fa-check"></i> پرونده مجزا برای هر فرزند</span>
+          <span><i class="fa-solid fa-check"></i> حفظ حریم خصوصی</span>
+        </div>
+      </div>
+      <div class="col-lg-6" data-animate="animate__zoomIn">
+        <div class="hero-visual">
+          <img src="{{ url_for('static', filename='img/hero-family.webp') }}" alt="گفت‌وگوی آرام مادر با دختر نوجوان محجبه" width="1400" height="788">
+          <div class="floating-card card-top"><span class="float-icon coral"><i class="fa-solid fa-heart-pulse"></i></span><div><strong>مکث قبل از واکنش</strong><small>یک مهارت کوچک، یک تغییر بزرگ</small></div></div>
+          <div class="floating-card card-bottom"><span class="float-icon gold"><i class="fa-solid fa-route"></i></span><div><strong>مسیر اختصاصی</strong><small>برای هر فرزند، جداگانه</small></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="scope-strip" aria-label="دامنه طراحی‌شده محصول">
+  <div class="container"><div class="row g-3 text-center">
+    <div class="col-6 col-lg-3" data-animate="animate__fadeInUp"><strong>۳</strong><span>مسیر اصلی رشد</span></div>
+    <div class="col-6 col-lg-3" data-animate="animate__fadeInUp"><strong>۲۰</strong><span>مهارت هدف‌گذاری‌شده</span></div>
+    <div class="col-6 col-lg-3" data-animate="animate__fadeInUp"><strong>۲۵</strong><span>موضوع پرتکرار</span></div>
+    <div class="col-6 col-lg-3" data-animate="animate__fadeInUp"><strong>۵</strong><span>سطح شدت هر موقعیت</span></div>
+  </div></div>
+</section>
+
+<section class="section-space" id="solution">
+  <div class="container">
+    <div class="section-heading text-center" data-animate="animate__fadeInUp">
+      <span class="eyebrow">یک تجربه یکپارچه</span>
+      <h2>سه مسیر که به یک هدف می‌رسند</h2>
+      <p>شناخت، یادگیری و تمرین در یک پرونده منسجم کنار هم قرار می‌گیرند.</p>
+    </div>
+    <div class="row g-4 mt-3">
+      <div class="col-lg-4" data-animate="animate__fadeInUp"><article class="pillar-card"><span class="number">۰۱</span><div class="pillar-icon"><i class="fa-solid fa-compass"></i></div><h3>سنجش سبک والدگری</h3><p>یک خط پایه برای شناخت الگوهای ارتباطی و ساخت پیشنهادهای متناسب با نیاز خانواده.</p><a href="{{ url_for('auth.register') }}">ساخت خط پایه <i class="fa-solid fa-arrow-left"></i></a></article></div>
+      <div class="col-lg-4" data-animate="animate__fadeInUp"><article class="pillar-card featured"><span class="number">۰۲</span><div class="pillar-icon"><i class="fa-solid fa-seedling"></i></div><h3>مهارت‌های والدگری</h3><p>ریزیادگیری‌های کوتاه درباره گوش‌دادن فعال، همدلی، حل مسئله، مرزبندی و تنظیم هیجان.</p><a href="#skills">دیدن مهارت‌ها <i class="fa-solid fa-arrow-left"></i></a></article></div>
+      <div class="col-lg-4" data-animate="animate__fadeInUp"><article class="pillar-card"><span class="number">۰۳</span><div class="pillar-icon"><i class="fa-solid fa-people-arrows"></i></div><h3>موقعیت‌های واقعی</h3><p>تمرین تصمیم پیش از وقوع تعارض، دیدن پیامد پاسخ اشتباه و یادگیری جایگزین مقتدرانه.</p><a href="#situations">ورود به سناریو <i class="fa-solid fa-arrow-left"></i></a></article></div>
+    </div>
+  </div>
+</section>
+
+<section class="section-space soft-section" id="journey">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-5" data-animate="animate__fadeInRight"><span class="eyebrow">سفر والد</span><h2>از «الان چه کار کنم؟» تا یک پاسخ قابل تمرین</h2><p class="section-copy">والدیار به‌جای نسخه‌های کلی، زمینه را می‌پرسد: کدام فرزند؟ چه موقعیتی؟ شدت چقدر است؟ بعد راهکار را مرحله‌به‌مرحله ارائه می‌دهد.</p><a class="btn btn-primary-custom" href="{{ url_for('auth.register') }}">ساخت پرونده خانواده</a></div>
+      <div class="col-lg-7">
+        <div class="journey-list">
+          {% for icon, title, text in [
+            ('fa-user-plus','ثبت‌نام ساده','موبایل و رمز عبور؛ بدون کد تأیید در نسخه فعلی'),
+            ('fa-children','انتخاب فرزند','اطلاعات و پیشرفت هر فرزند کاملاً مجزا'),
+            ('fa-clipboard-check','سنجش کوتاه','ساخت خط پایه و اولویت‌های رشد'),
+            ('fa-book-open-reader','یادگیری کوچک','محتوای کوتاه، تمرین و اقدام امروز'),
+            ('fa-route','تمرین موقعیت','انتخاب شدت و دیدن مسیر برخورد'),
+            ('fa-chart-line','پیگیری رشد','مرور سنجش‌ها، مهارت‌ها و اقدام‌های بعدی')
+          ] %}
+          <div class="journey-item" data-animate="animate__fadeInLeft"><span>{{ loop.index }}</span><i class="fa-solid {{ icon }}"></i><div><h3>{{ title }}</h3><p>{{ text }}</p></div></div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-space" id="skills">
+  <div class="container">
+    <div class="section-heading d-lg-flex justify-content-between align-items-end"><div><span class="eyebrow">جعبه‌ابزار والد</span><h2>مهارت‌هایی برای رابطه امروز</h2></div><p>هر مهارت کوتاه، قابل تمرین و متصل به یک موقعیت واقعی است.</p></div>
+    <div class="row g-4 mt-3">
+      {% for skill in skills %}
+      <div class="col-md-6 col-xl-4" data-animate="animate__fadeInUp"><article class="skill-card"><div class="skill-top"><span><i class="fa-solid {{ skill.icon }}"></i></span><small>{{ skill.duration }} دقیقه</small></div><h3>{{ skill.title }}</h3><p>{{ skill.description }}</p><div class="skill-line"><i style="width: {{ 28 + loop.index * 8 }}%"></i></div></article></div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section-space scenario-section" id="situations">
+  <div class="container">
+    <div class="section-heading text-center text-white" data-animate="animate__fadeInUp"><span class="eyebrow light">آزمایشگاه تصمیم</span><h2>اول اینجا تمرین کن، بعد در خانه پاسخ بده</h2><p>نمونه نمایشی: نوجوان می‌گوید «گوشی‌ام را پس نمی‌دهم!»</p></div>
+    <div class="scenario-demo" data-animate="animate__fadeInUp">
+      <div class="scenario-stage active" data-stage="1"><div class="scenario-person"><i class="fa-solid fa-mobile-screen-button"></i></div><div><span class="stage-label">موقعیت</span><h3>استفاده از موبایل از زمان توافق‌شده عبور کرده است.</h3><p>شدت موقعیت را بر اساس تکرار، میزان تنش و اثر آن بر خواب یا مدرسه انتخاب کنید.</p><div class="severity-demo" role="group" aria-label="انتخاب شدت"><button data-level="1">خفیف</button><button data-level="2">قابل توجه</button><button data-level="3" class="active">جدی</button><button data-level="4">شدید</button><button data-level="5">بحرانی</button></div></div></div>
+      <div class="scenario-grid mt-4">
+        <button class="response-card wrong" data-feedback="تهدید فوری احتمال جنگ قدرت و پنهان‌کاری را بیشتر می‌کند."><span>A</span>«اگر همین الان ندهی، یک هفته کلاً گوشی نداری.»</button>
+        <button class="response-card good" data-feedback="شروع آرام و یادآوری توافق، احتمال همکاری را بالا می‌برد؛ بعد برای اجرای پیامد توافق‌شده زمان مشخص کنید."><span>B</span>«می‌بینم جداشدن از گوشی سخت شده؛ توافق‌مان را یادآوری کنیم و برای پایان‌دادن دو دقیقه فرصت بگذاریم.»</button>
+        <button class="response-card" data-feedback="بی‌تفاوتی ممکن است مرز را مبهم کند. بهتر است بدون درگیری، توافق را پیگیری کنید."><span>C</span>فعلاً چیزی نگویم و موضوع را کاملاً رها کنم.</button>
+      </div>
+      <div class="feedback-box" id="scenarioFeedback"><i class="fa-solid fa-hand-pointer"></i><span>یک پاسخ را انتخاب کنید تا پیامد احتمالی آن را ببینید.</span></div>
+    </div>
+    <div class="topic-chips mt-4 justify-content-center">{% for topic in topics %}<span><i class="fa-solid {{ topic.icon }}"></i>{{ topic.title }}</span>{% endfor %}<span>+ ۲۰ موضوع دیگر در نقشه محتوا</span></div>
+  </div>
+</section>
+
+<section class="section-space admin-preview">
+  <div class="container"><div class="row align-items-center g-5">
+    <div class="col-lg-6" data-animate="animate__fadeInRight"><span class="eyebrow">قدرت محتوا در دست متخصص</span><h2>مدیریت مسیرها، نه فقط مدیریت صفحه‌ها</h2><p class="section-copy">مدیر سامانه می‌تواند موضوع، سطح شدت، پاسخ پیشنهادی، خطاهای رایج و پیامدهای احتمالی را بدون تغییر کد تنظیم کند؛ فرم‌ساز داخلی نیز سنجش‌ها و پرسش‌نامه‌های جدید را می‌سازد.</p><ul class="check-list"><li>درخت تصمیم چندشاخه برای هر سطح شدت</li><li>فرم‌ساز پویا با انواع فیلد و وضعیت انتشار</li><li>گزارش والد، فرزند، سنجش و پیشرفت</li><li>تفکیک نقش مدیر و والد</li></ul></div>
+    <div class="col-lg-6" data-animate="animate__zoomIn"><div class="mini-admin"><div class="mini-top"><span></span><span></span><span></span><b>درخت مسیر ارتباط</b></div><div class="tree-root"><i class="fa-solid fa-mobile-screen"></i><strong>موبایل · سطح جدی</strong></div><div class="tree-lines"><div class="tree-node danger"><small>واکنش تکانه‌ای</small><strong>تهدید و گرفتن اجباری</strong><span>مقاومت بیشتر</span></div><div class="tree-node success"><small>پاسخ مقتدرانه</small><strong>همدلی + اجرای توافق</strong><span>مرز روشن، رابطه امن</span></div></div></div></div>
+  </div></div>
+</section>
+
+<section class="cta-section"><div class="container"><div class="cta-card" data-animate="animate__fadeInUp"><div><span class="eyebrow light">یک قدم کوچک برای امروز</span><h2>مسیر اختصاصی خانواده‌تان را بسازید.</h2><p>ثبت‌نام کمتر از یک دقیقه زمان می‌برد و فعلاً به پیامک یا کد تأیید نیاز ندارد.</p></div><a class="btn btn-light btn-lg" href="{{ url_for('auth.register') }}">شروع رایگان <i class="fa-solid fa-arrow-left me-2"></i></a></div></div></section>
+{% endblock %}
+

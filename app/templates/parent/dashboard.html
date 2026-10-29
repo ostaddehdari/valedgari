@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}داشبورد خانواده | والدیار{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<section class="dashboard-hero"><div class="container"><div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3"><div><span class="eyebrow light">سلام {{ current_user.full_name.split()[0] }}</span><h1>{% if child %}امروز برای رابطه با {{ child.name }} چه قدمی برمی‌داریم؟{% else %}اولین پرونده فرزندتان را بسازید{% endif %}</h1><p>قدم‌های کوچک، پیوسته و قابل اجرا.</p></div><a class="btn btn-light" href="{{ url_for('parent.scenario') }}"><i class="fa-solid fa-wand-magic-sparkles ms-2"></i>راهنمای موقعیت امروز</a></div></div></section>
+<div class="container dashboard-content">
+  {% include "parent/_child_switcher.html" %}
+  {% if not child %}
+    <div class="empty-state" data-animate="animate__fadeInUp"><div class="empty-icon"><i class="fa-solid fa-children"></i></div><h2>برای شروع یک فرزند اضافه کنید</h2><p>سنجش‌ها، مهارت‌ها و موقعیت‌ها برای هر فرزند جداگانه نگهداری می‌شود.</p><a class="btn btn-primary-custom" href="{{ url_for('parent.children') }}">ساخت پرونده فرزند</a></div>
+  {% else %}
+    <div class="row g-4 mt-1">
+      <div class="col-lg-8"><div class="action-card" data-animate="animate__fadeInUp"><div class="action-copy"><span class="status-dot"></span><small>پیشنهاد امروز</small><h2>{% if assessment %}یک تمرین گوش‌دادن فعال با {{ child.name }}{% else %}خط پایه والدگری را برای {{ child.name }} بسازید{% endif %}</h2><p>{% if assessment %}در یک گفت‌وگوی پنج‌دقیقه‌ای فقط بازتاب دهید؛ راه‌حل ندهید مگر اینکه از شما خواسته شود.{% else %}این سنجش کوتاه کمک می‌کند اولویت‌های یادگیری شما شخصی‌تر شوند.{% endif %}</p><a class="btn btn-primary-custom" href="{{ url_for('parent.skills') if assessment else url_for('parent.assessment') }}">{{ 'شروع تمرین' if assessment else 'شروع سنجش' }} <i class="fa-solid fa-arrow-left me-2"></i></a></div><div class="action-illustration"><i class="fa-solid {{ 'fa-ear-listen' if assessment else 'fa-compass' }}"></i><span></span><span></span></div></div></div>
+      <div class="col-lg-4"><div class="score-card" data-animate="animate__fadeInUp"><div class="score-ring" style="--score: {{ assessment.score if assessment else 0 }}"><span>{{ assessment.score if assessment else '—' }}<small>{% if assessment %}%{% endif %}</small></span></div><h3>وضعیت خط پایه</h3><p>{{ assessment.level if assessment else 'هنوز سنجشی ثبت نشده است' }}</p><a href="{{ url_for('parent.assessment') }}">{{ 'سنجش دوباره' if assessment else 'شروع سنجش' }}</a></div></div>
+    </div>
+    <div class="row g-4 mt-1">
+      <div class="col-md-4"><a class="dashboard-tile teal" href="{{ url_for('parent.skills') }}"><span><i class="fa-solid fa-seedling"></i></span><div><small>مهارت‌ها</small><h3>{{ completed }} مهارت تکمیل‌شده</h3><p>ادامه یادگیری کوتاه</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
+      <div class="col-md-4"><a class="dashboard-tile coral" href="{{ url_for('parent.scenario') }}"><span><i class="fa-solid fa-route"></i></span><div><small>موقعیت‌ها</small><h3>انتخاب شدت و پاسخ</h3><p>قبل از واکنش تمرین کنید</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
+      <div class="col-md-4"><a class="dashboard-tile gold" href="{{ url_for('parent.children') }}"><span><i class="fa-solid fa-folder-open"></i></span><div><small>پرونده خانواده</small><h3>{{ current_user.children|length }} فرزند</h3><p>افزودن یا مرور پرونده‌ها</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
