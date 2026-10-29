@@ -3,9 +3,12 @@ import json
 
 from .models import (
     AssessmentInstrument,
+    MicroLesson,
     PersonalizationRule,
     ScenarioLevel,
     ScenarioTopic,
+    SkillDomain,
+    SkillDomainMembership,
     SkillModule,
 )
 
@@ -35,6 +38,37 @@ LEVELS = [
     (3, "جدی"),
     (4, "شدید"),
     (5, "بحرانی"),
+]
+
+
+SKILL_DOMAINS = [
+    ("parent-self-regulation", "خودتنظیمی والد", "مکث، شناخت هیجان و انتخاب پاسخ پیش از واکنش.", "fa-spa"),
+    ("connection", "ارتباط و پیوند عاطفی", "شنیدن، همدلی و ساخت احساس امنیت در رابطه.", "fa-heart"),
+    ("boundaries", "مرزبندی، قانون و پیامد", "قواعد روشن، انتخاب محدود و پیامد قابل پیش‌بینی.", "fa-shield-heart"),
+    ("development-motivation", "شناخت رشد و انگیزه", "دیدن نیاز رشدی و تقویت انگیزه درونی نوجوان.", "fa-seedling"),
+    ("problem-conflict", "حل مسئله و تعارض", "تبدیل اختلاف به مسئله مشترک و توافق کوچک.", "fa-puzzle-piece"),
+    ("risk-referral", "موقعیت ویژه، ریسک و ارجاع", "تشخیص مرز آموزش، اولویت ایمنی و مراجعه به حمایت تخصصی.", "fa-life-ring"),
+]
+
+
+DOMAIN_SKILLS = {
+    "parent-self-regulation": ["emotion-regulation"],
+    "connection": ["active-listening", "empathy"],
+    "boundaries": ["boundaries"],
+    "development-motivation": ["motivation"],
+    "problem-conflict": ["problem-solving"],
+    "risk-referral": ["emotion-regulation"],
+}
+
+
+MICRO_LESSONS = [
+    ("pause-before-response", "parent-self-regulation", "emotion-regulation", "مکث سه‌مرحله‌ای پیش از پاسخ", "والد بتواند میان محرک و واکنش چند ثانیه فاصله بسازد.", "توقف کنید، یک بازدم آرام انجام دهید و فقط احساس خود را نام ببرید؛ سپس یک جمله کوتاه انتخاب کنید.", "امروز پیش از یک پاسخ دشوار، سه ثانیه مکث و یک بازدم آرام را تمرین کنید.", "مکث را به سکوت تنبیهی یا بی‌اعتنایی طولانی تبدیل نکنید."),
+    ("reflect-before-solve", "connection", "active-listening", "پیش از راه‌حل، بازتاب بدهید", "والد بتواند یک احساس یا نیاز را بدون قضاوت بازتاب دهد.", "بازتاب یعنی حدس محترمانه از تجربه فرزند: «به نظر می‌آید این اتفاق واقعاً خسته‌ات کرده». بعد مکث کنید.", "در یک گفت‌وگوی پنج‌دقیقه‌ای فقط یک بازتاب دقیق بگویید و سؤال پشت سؤال نپرسید.", "بازتاب را با «اما» یا نصیحت فوری خنثی نکنید."),
+    ("name-the-feeling", "connection", "empathy", "نام‌گذاری هیجان بدون برچسب", "والد هیجان را از شخصیت و ارزشمندی فرزند جدا کند.", "درباره حالت همین لحظه حرف بزنید، نه هویت ثابت: «الان عصبانی به نظر می‌رسی» به‌جای «تو همیشه عصبی هستی».", "یک جمله هیجانی بدون واژه‌های همیشه، هیچ‌وقت و تو آدمِ... بسازید.", "حدس خود را حقیقت قطعی اعلام نکنید؛ امکان اصلاح به فرزند بدهید."),
+    ("clear-kind-boundary", "boundaries", "boundaries", "مرز کوتاه، روشن و محترمانه", "والد بتواند مرز را بدون تهدید و سخنرانی بیان کند.", "مرز مؤثر سه جزء دارد: رفتار قابل قبول، زمان یا محدوده روشن، و پیامد قابل پیش‌بینی و مرتبط.", "یک قانون خانه را در کمتر از پانزده کلمه بازنویسی کنید.", "در اوج تعارض قانون تازه نسازید یا پیامد نامرتبط تعیین نکنید."),
+    ("small-motivation-step", "development-motivation", "motivation", "انگیزه با قدم کوچک", "والد نتیجه بزرگ را به یک اقدام کوچک و قابل شروع تبدیل کند.", "به‌جای پرسیدن «چرا انجام ندادی؟» مانع شروع را پیدا کنید و قدمی انتخاب کنید که در پانزده دقیقه انجام شود.", "یک کار عقب‌افتاده را به اولین قدم حداکثر پانزده‌دقیقه‌ای تبدیل کنید.", "پاداش بزرگ یا تهدید را جایگزین فهم مانع واقعی نکنید."),
+    ("shared-problem", "problem-conflict", "problem-solving", "مسئله مشترک، نه نبرد دو نفر", "والد و نوجوان بتوانند مسئله را بدون مقصرسازی تعریف کنند.", "دو نیاز را کنار هم بنویسید: نیاز والد و نیاز نوجوان. سپس یک راه‌حل آزمایشی کوتاه برای هر دو انتخاب کنید.", "یک تعارض را با جمله «چطور می‌توانیم هم... و هم...» بازنویسی کنید.", "راه‌حل از پیش تعیین‌شده را با ظاهر سؤال به فرزند تحمیل نکنید."),
+    ("safety-first", "risk-referral", "emotion-regulation", "وقتی آموزش باید متوقف شود", "والد بداند در خطر فوری، ایمنی بر گفت‌وگو و آموزش مقدم است.", "اگر احتمال آسیب به خود یا دیگری وجود دارد، بحث را متوقف، فاصله امن ایجاد و از حمایت حضوری تخصصی یا امدادی استفاده کنید.", "شماره‌ها و دو فرد امن خانواده را برای موقعیت ضروری از قبل مشخص کنید.", "در بحران وارد بحث اثبات حقانیت، تنبیه یا مهار فیزیکی بدون آموزش نشوید."),
 ]
 
 
@@ -96,6 +130,59 @@ def seed_content():
                         consequence="احتمال مقاومت، پنهان‌کاری یا فاصله عاطفی بیشتر می‌شود. این پیامد قطعی نیست و به زمینه خانواده وابسته است.",
                     )
                 )
+        db.session.flush()
+
+    if SkillDomain.query.count() == 0:
+        db.session.flush()
+        modules = {item.slug: item for item in SkillModule.query.all()}
+        domains = {}
+        for order, item in enumerate(SKILL_DOMAINS, 1):
+            slug, title, description, icon = item
+            domain = SkillDomain(
+                slug=slug,
+                title=title,
+                description=description,
+                icon=icon,
+                sort_order=order,
+            )
+            db.session.add(domain)
+            db.session.flush()
+            domains[slug] = domain
+            for skill_order, skill_slug in enumerate(DOMAIN_SKILLS.get(slug, []), 1):
+                module = modules.get(skill_slug)
+                if module:
+                    db.session.add(
+                        SkillDomainMembership(
+                            domain_id=domain.id,
+                            module_id=module.id,
+                            learning_level=("safety" if slug == "risk-referral" else "foundation"),
+                            sort_order=skill_order,
+                        )
+                    )
+        db.session.flush()
+
+    if MicroLesson.query.count() == 0:
+        domains = {item.slug: item for item in SkillDomain.query.all()}
+        modules = {item.slug: item for item in SkillModule.query.all()}
+        for order, item in enumerate(MICRO_LESSONS, 1):
+            slug, domain_slug, module_slug, title, objective, body, practice, pitfall = item
+            if domain_slug not in domains or module_slug not in modules:
+                continue
+            db.session.add(
+                MicroLesson(
+                    domain_id=domains[domain_slug].id,
+                    module_id=modules[module_slug].id,
+                    slug=slug,
+                    title=title,
+                    objective=objective,
+                    body=body,
+                    practice=practice,
+                    common_pitfall=pitfall,
+                    duration=7,
+                    status="published",
+                    sort_order=order,
+                )
+            )
         db.session.flush()
 
     if PersonalizationRule.query.count() == 0 and ScenarioTopic.query.count():

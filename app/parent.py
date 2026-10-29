@@ -10,7 +10,9 @@ from .models import (
     AssessmentInstrument,
     Child,
     ChildProfileSnapshot,
+    DailyAction,
     HomeActionOutcome,
+    PlanReview,
     PaymentAllocation,
     ParentingAssessment,
     ParentingStyleAssessment,
@@ -23,8 +25,10 @@ from .models import (
     SkillModule,
     SkillProgress,
     SponsoredProject,
+    WeeklyPlan,
     utcnow,
 )
+from .learning_path import build_weekly_plan, suggested_topic_for_child
 from .recommendation_engine import build_personalized_recommendation
 
 
@@ -205,6 +209,8 @@ def dashboard():
     relationship_profile = latest_profile_snapshot(child.id, "relationship") if child else None
     style_result = None
     latest_recommendation = None
+    active_plan = None
+    today_action = None
     if child:
         style_result = (
             ParentingStyleAssessment.query.filter_by(
@@ -218,6 +224,16 @@ def dashboard():
             .order_by(RecommendationRun.created_at.desc())
             .first()
         )
+        active_plan = (
+            WeeklyPlan.query.filter(
+                WeeklyPlan.user_id == current_user.id,
+                WeeklyPlan.child_id == child.id,
+                WeeklyPlan.status.in_(["active", "awaiting_review"]),
+            )
+            .order_by(WeeklyPlan.created_at.desc())
+            .first()
+        )
+        today_action = active_plan.current_action if active_plan else None
     return render_template(
         "parent/dashboard.html",
         child=child,
@@ -228,6 +244,8 @@ def dashboard():
         relationship_profile=relationship_profile,
         style_result=style_result,
         latest_recommendation=latest_recommendation,
+        active_plan=active_plan,
+        today_action=today_action,
     )
 
 
@@ -672,6 +690,148 @@ def scenario():
         level=level,
         recommendation=recommendation,
     )
+
+
+@bp.route("/journey", methods=["GET", "POST"])
+@login_required
+def journey():
+    child = owned_child()
+    if not child:
+        flash("ابتدا پرونده یک فرزند را بسازید.", "warning")
+        return redirect(url_for("parent.children"))
+    active_plan = (
+        WeeklyPlan.query.filter(
+            WeeklyPlan.user_id == current_user.id,
+            WeeklyPlan.child_id == child.id,
+            WeeklyPlan.status.in_(["active", "awaiting_review"]),
+        )
+        .order_by(WeeklyPlan.created_at.desc())
+        .first()
+    )
+    topics = ScenarioTopic.query.filter_by(is_published=True).order_by(ScenarioTopic.id).all()
+    suggested_topic = suggested_topic_for_child(current_user.id, child)
+    if request.method == "POST":
+        if active_plan:
+            flash("برای این فرزند یک برنامه هفتگی فعال وجود دارد؛ ابتدا آن را مرور کنید.", "warning")
+            return redirect(url_for("parent.plan_detail", plan_id=active_plan.id))
+        topic = db.session.get(ScenarioTopic, request.form.get("topic_id", type=int))
+        if not topic or not topic.is_published:
+            abort(404)
+        plan = build_weekly_plan(
+            current_user.id,
+            child,
+            topic,
+            request.form.get("goal_title", ""),
+        )
+        db.session.commit()
+        flash(f"برنامه هفت‌روزه {child.name} ساخته شد؛ امروز فقط قدم اول را انجام دهید.", "success")
+        return redirect(url_for("parent.plan_detail", plan_id=plan.id))
+    history = (
+        WeeklyPlan.query.filter_by(user_id=current_user.id, child_id=child.id)
+        .order_by(WeeklyPlan.created_at.desc())
+        .all()
+    )
+    return render_template(
+        "parent/journey.html",
+        child=child,
+        active_plan=active_plan,
+        topics=topics,
+        suggested_topic=suggested_topic,
+        history=history,
+    )
+
+
+@bp.get("/journey/<int:plan_id>")
+@login_required
+def plan_detail(plan_id):
+    plan = db.session.get(WeeklyPlan, plan_id)
+    if not plan or plan.user_id != current_user.id:
+        abort(404)
+    child = owned_child(plan.child_id)
+    return render_template("parent/plan_detail.html", child=child, plan=plan)
+
+
+@bp.post("/journey/actions/<int:action_id>")
+@login_required
+def complete_daily_action(action_id):
+    action = db.session.get(DailyAction, action_id)
+    if not action or action.plan.user_id != current_user.id:
+        abort(404)
+    owned_child(action.plan.child_id)
+    if action.plan.status not in {"active", "awaiting_review"}:
+        flash("این برنامه بسته شده است.", "warning")
+        return redirect(url_for("parent.plan_detail", plan_id=action.plan.id))
+    if action.status == "completed":
+        flash("این قدم قبلاً تکمیل شده است.", "info")
+        return redirect(url_for("parent.plan_detail", plan_id=action.plan.id))
+    current_action = action.plan.current_action
+    if not current_action or current_action.id != action.id:
+        flash("قدم‌ها را به‌ترتیب انجام دهید تا مسیر قابل پیگیری بماند.", "warning")
+        return redirect(url_for("parent.plan_detail", plan_id=action.plan.id))
+    confidence = request.form.get("confidence", type=int)
+    if confidence not in range(1, 6):
+        flash("میزان اطمینان را از ۱ تا ۵ مشخص کنید.", "danger")
+        return redirect(url_for("parent.plan_detail", plan_id=action.plan.id))
+    action.status = "completed"
+    action.parent_note = request.form.get("parent_note", "").strip()[:1200]
+    action.confidence = confidence
+    action.completed_at = utcnow()
+    if action.lesson:
+        progress = SkillProgress.query.filter_by(
+            user_id=current_user.id,
+            child_id=action.plan.child_id,
+            module_id=action.lesson.module_id,
+        ).first()
+        if not progress:
+            progress = SkillProgress(
+                user_id=current_user.id,
+                child_id=action.plan.child_id,
+                module_id=action.lesson.module_id,
+                percent=0,
+            )
+            db.session.add(progress)
+        progress.percent = min(100, (progress.percent or 0) + 20)
+        progress.updated_at = utcnow()
+    db.session.flush()
+    if not action.plan.current_action:
+        action.plan.status = "awaiting_review"
+    db.session.commit()
+    flash("قدم امروز ثبت شد؛ حالا فقط قدم بعدی را ببینید.", "success")
+    return redirect(url_for("parent.plan_detail", plan_id=action.plan.id))
+
+
+@bp.post("/journey/<int:plan_id>/review")
+@login_required
+def review_plan(plan_id):
+    plan = db.session.get(WeeklyPlan, plan_id)
+    if not plan or plan.user_id != current_user.id:
+        abort(404)
+    owned_child(plan.child_id)
+    if plan.current_action:
+        flash("پیش از مرور نهایی، قدم‌های باقی‌مانده را کامل کنید.", "warning")
+        return redirect(url_for("parent.plan_detail", plan_id=plan.id))
+    rating = request.form.get("rating", type=int)
+    confidence = request.form.get("confidence", type=int)
+    relationship_change = request.form.get("relationship_change", "")
+    if rating not in range(1, 6) or confidence not in range(1, 6):
+        flash("امتیاز هفته و اطمینان را از ۱ تا ۵ مشخص کنید.", "danger")
+    elif relationship_change not in {"improved", "same", "worsened"}:
+        flash("تغییر رابطه را مشخص کنید.", "danger")
+    else:
+        review = plan.review or PlanReview(weekly_plan_id=plan.id)
+        review.rating = rating
+        review.confidence = confidence
+        review.relationship_change = relationship_change
+        review.what_worked = request.form.get("what_worked", "").strip()[:1200]
+        review.next_focus = request.form.get("next_focus", "").strip()[:500]
+        if not plan.review:
+            db.session.add(review)
+        plan.status = "completed"
+        plan.completed_at = utcnow()
+        db.session.commit()
+        flash("هفته بسته شد؛ اکنون می‌توانید هدف بعدی را با تجربه واقعی انتخاب کنید.", "success")
+        return redirect(url_for("parent.journey"))
+    return redirect(url_for("parent.plan_detail", plan_id=plan.id))
 
 
 @bp.get("/recommendations")

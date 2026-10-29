@@ -6,17 +6,23 @@ from app.models import (
     AssessmentQuestion,
     Child,
     ChildProfileSnapshot,
+    DailyAction,
     HomeActionOutcome,
+    MicroLesson,
     Organization,
     ParentingAssessment,
     ParentingStyleAssessment,
     PaymentAllocation,
     ProjectAuditLog,
     ProjectMembership,
+    PlanReview,
     RecommendationRun,
     ScenarioTopic,
+    SkillDomain,
+    SkillProgress,
     SponsoredProject,
     User,
+    WeeklyPlan,
 )
 
 from .conftest import login
@@ -89,6 +95,7 @@ def test_admin_can_open_builders(client):
     assert client.get("/admin/forms").status_code == 200
     assert client.get("/admin/projects").status_code == 200
     assert client.get("/admin/assessments/baumrind").status_code == 200
+    assert client.get("/admin/learning-path").status_code == 200
 
 
 def create_sponsored_project(client, capacity="10", budget="7000000"):
@@ -443,4 +450,177 @@ def test_admin_can_manage_personalization_rules(client):
     body = page.get_data(as_text=True)
     assert "شخصی‌سازی توضیح‌پذیر" in body
     assert "ساخت مسیر شخصی‌سازی" in body
+
+
+def create_weekly_plan(client, app, child_name="سارا", topic_slug="anger"):
+    client.post(
+        "/dashboard/children",
+        data={"name": child_name, "birth_year": "1392", "gender": "girl"},
+    )
+    topic_id = scenario_topic_id(app, topic_slug)
+    response = client.post(
+        "/dashboard/journey",
+        data={"topic_id": topic_id, "goal_title": f"هدف هفته {child_name}"},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        return WeeklyPlan.query.filter_by(child_id=Child.query.filter_by(name=child_name).one().id).one().id
+
+
+def test_stage_four_taxonomy_and_micro_lessons_are_seeded(app):
+    with app.app_context():
+        assert SkillDomain.query.count() == 6
+        assert MicroLesson.query.filter_by(status="published").count() == 7
+        titles = {item.title for item in SkillDomain.query.all()}
+        assert "خودتنظیمی والد" in titles
+        assert "موقعیت ویژه، ریسک و ارجاع" in titles
+
+
+def test_weekly_plan_builds_seven_coherent_actions(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    page = client.get(f"/dashboard/journey/{plan_id}")
+    assert page.status_code == 200
+    assert client.get("/dashboard/").status_code == 200
+    body = page.get_data(as_text=True)
+    assert "هدف هفته سارا" in body
+    assert "قدم 1 از ۷" in body
+    assert "مکث سه‌مرحله‌ای پیش از پاسخ" in body
+    with app.app_context():
+        plan = db.session.get(WeeklyPlan, plan_id)
+        assert len(plan.actions) == 7
+        assert [item.action_type for item in plan.actions] == [
+            "lesson",
+            "observe",
+            "lesson",
+            "scenario",
+            "home_action",
+            "repair",
+            "review",
+        ]
+        assert plan.source_context["topic_slug"] == "anger"
+        assert plan.progress_percent == 0
+
+
+def test_daily_actions_must_be_completed_in_order(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    with app.app_context():
+        actions = DailyAction.query.filter_by(weekly_plan_id=plan_id).order_by(DailyAction.day_index).all()
+        first_id, second_id = actions[0].id, actions[1].id
+    blocked = client.post(
+        f"/dashboard/journey/actions/{second_id}",
+        data={"confidence": "3", "parent_note": "نباید ثبت شود"},
+        follow_redirects=True,
+    )
+    assert "قدم‌ها را به‌ترتیب انجام دهید" in blocked.get_data(as_text=True)
+    response = client.post(
+        f"/dashboard/journey/actions/{first_id}",
+        data={"confidence": "4", "parent_note": "قبل از پاسخ مکث کردم."},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        plan = db.session.get(WeeklyPlan, plan_id)
+        assert plan.completed_count == 1
+        assert plan.current_action.id == second_id
+        assert SkillProgress.query.one().percent == 20
+
+
+def test_only_one_active_weekly_plan_per_child(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    topic_id = scenario_topic_id(app, "lying")
+    response = client.post(
+        "/dashboard/journey",
+        data={"topic_id": topic_id, "goal_title": "برنامه دوم"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/dashboard/journey/{plan_id}")
+    with app.app_context():
+        assert WeeklyPlan.query.count() == 1
+
+
+def test_week_review_closes_plan_and_allows_next_cycle(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    with app.app_context():
+        action_ids = [
+            item.id
+            for item in DailyAction.query.filter_by(weekly_plan_id=plan_id)
+            .order_by(DailyAction.day_index)
+            .all()
+        ]
+    for action_id in action_ids:
+        response = client.post(
+            f"/dashboard/journey/actions/{action_id}",
+            data={"confidence": "4", "parent_note": "قدم انجام شد."},
+        )
+        assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(WeeklyPlan, plan_id).status == "awaiting_review"
+    review = client.post(
+        f"/dashboard/journey/{plan_id}/review",
+        data={
+            "rating": "4",
+            "confidence": "4",
+            "relationship_change": "improved",
+            "what_worked": "جمله‌های کوتاه بهتر جواب داد.",
+            "next_focus": "ثبات در مرزها",
+        },
+    )
+    assert review.status_code == 302
+    with app.app_context():
+        plan = db.session.get(WeeklyPlan, plan_id)
+        assert plan.status == "completed"
+        assert plan.review.relationship_change == "improved"
+        assert PlanReview.query.count() == 1
+
+
+def test_weekly_plan_is_isolated_between_parents(client, app):
+    login(client)
+    plan_id = create_weekly_plan(client, app)
+    with app.app_context():
+        action_id = DailyAction.query.filter_by(weekly_plan_id=plan_id).first().id
+        second = User(full_name="والد دوم", mobile="09120000003", role="parent")
+        second.set_password("ParentPass123")
+        db.session.add(second)
+        db.session.commit()
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="ParentPass123")
+    assert client.get(f"/dashboard/journey/{plan_id}").status_code == 404
+    assert client.post(
+        f"/dashboard/journey/actions/{action_id}", data={"confidence": "3"}
+    ).status_code == 404
+
+
+def test_admin_can_version_a_micro_lesson(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    with app.app_context():
+        domain_id = SkillDomain.query.first().id
+        module_id = MicroLesson.query.first().module_id
+    payload = {
+        "action": "save_lesson",
+        "title": "ریزدَرس آزمایشی",
+        "slug": "test-micro-lesson",
+        "duration": "8",
+        "domain_id": str(domain_id),
+        "module_id": str(module_id),
+        "objective": "تمرین یک پاسخ کوتاه و روشن در موقعیت واقعی",
+        "body": "این متن آموزشی آزمایشی برای بررسی نسخه‌بندی ریزدرس در پنل مدیر است.",
+        "practice": "یک جمله کوتاه بنویسید.",
+        "common_pitfall": "از سخنرانی طولانی پرهیز کنید.",
+        "status": "published",
+    }
+    first = client.post("/admin/learning-path", data=payload)
+    assert first.status_code == 302
+    with app.app_context():
+        lesson = MicroLesson.query.filter_by(slug="test-micro-lesson").one()
+        lesson_id = lesson.id
+        assert lesson.version == 1
+    second = client.post(
+        "/admin/learning-path", data={**payload, "lesson_id": str(lesson_id)}
+    )
+    assert second.status_code == 302
+    with app.app_context():
+        assert db.session.get(MicroLesson, lesson_id).version == 2
 

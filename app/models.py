@@ -92,6 +92,162 @@ class SkillProgress(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "child_id", "module_id"),)
 
 
+class SkillDomain(db.Model):
+    __tablename__ = "skill_domains"
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(140), nullable=False)
+    description = db.Column(db.String(700), nullable=False, default="")
+    icon = db.Column(db.String(60), nullable=False, default="fa-seedling")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    memberships = db.relationship(
+        "SkillDomainMembership",
+        backref="domain",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="SkillDomainMembership.sort_order",
+    )
+
+
+class SkillDomainMembership(db.Model):
+    __tablename__ = "skill_domain_memberships"
+    id = db.Column(db.Integer, primary_key=True)
+    domain_id = db.Column(
+        db.Integer, db.ForeignKey("skill_domains.id"), nullable=False, index=True
+    )
+    module_id = db.Column(
+        db.Integer, db.ForeignKey("skill_modules.id"), nullable=False, index=True
+    )
+    learning_level = db.Column(db.String(30), nullable=False, default="foundation")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    module = db.relationship("SkillModule")
+    __table_args__ = (db.UniqueConstraint("domain_id", "module_id"),)
+
+
+class MicroLesson(db.Model):
+    __tablename__ = "micro_lessons"
+    id = db.Column(db.Integer, primary_key=True)
+    domain_id = db.Column(
+        db.Integer, db.ForeignKey("skill_domains.id"), nullable=False, index=True
+    )
+    module_id = db.Column(
+        db.Integer, db.ForeignKey("skill_modules.id"), nullable=False, index=True
+    )
+    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    objective = db.Column(db.String(500), nullable=False, default="")
+    body = db.Column(db.Text, nullable=False)
+    practice = db.Column(db.String(700), nullable=False, default="")
+    common_pitfall = db.Column(db.String(700), nullable=False, default="")
+    duration = db.Column(db.Integer, nullable=False, default=7)
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    domain = db.relationship("SkillDomain")
+    module = db.relationship("SkillModule")
+
+
+class WeeklyPlan(db.Model):
+    __tablename__ = "weekly_plans"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True
+    )
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    goal_title = db.Column(db.String(220), nullable=False)
+    rationale = db.Column(db.String(1000), nullable=False, default="")
+    starts_on = db.Column(db.Date, nullable=False, default=date.today)
+    ends_on = db.Column(db.Date, nullable=False)
+    source_context_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    child = db.relationship("Child")
+    topic = db.relationship("ScenarioTopic")
+    actions = db.relationship(
+        "DailyAction",
+        backref="plan",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="DailyAction.day_index",
+    )
+    review = db.relationship(
+        "PlanReview", backref="plan", uselist=False, cascade="all, delete-orphan"
+    )
+
+    @property
+    def source_context(self):
+        try:
+            value = json.loads(self.source_context_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def completed_count(self):
+        return sum(item.status == "completed" for item in self.actions)
+
+    @property
+    def progress_percent(self):
+        return round(self.completed_count / len(self.actions) * 100) if self.actions else 0
+
+    @property
+    def current_action(self):
+        return next((item for item in self.actions if item.status != "completed"), None)
+
+
+class DailyAction(db.Model):
+    __tablename__ = "daily_actions"
+    id = db.Column(db.Integer, primary_key=True)
+    weekly_plan_id = db.Column(
+        db.Integer, db.ForeignKey("weekly_plans.id"), nullable=False, index=True
+    )
+    day_index = db.Column(db.Integer, nullable=False)
+    action_type = db.Column(db.String(30), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    instructions = db.Column(db.Text, nullable=False)
+    why_text = db.Column(db.String(700), nullable=False, default="")
+    duration = db.Column(db.Integer, nullable=False, default=5)
+    lesson_id = db.Column(db.Integer, db.ForeignKey("micro_lessons.id"), nullable=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey("scenario_topics.id"), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    parent_note = db.Column(db.String(1200), nullable=False, default="")
+    confidence = db.Column(db.Integer, nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    lesson = db.relationship("MicroLesson")
+    topic = db.relationship("ScenarioTopic")
+    __table_args__ = (db.UniqueConstraint("weekly_plan_id", "day_index"),)
+
+
+class PlanReview(db.Model):
+    __tablename__ = "plan_reviews"
+    id = db.Column(db.Integer, primary_key=True)
+    weekly_plan_id = db.Column(
+        db.Integer,
+        db.ForeignKey("weekly_plans.id"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    rating = db.Column(db.Integer, nullable=False)
+    relationship_change = db.Column(db.String(30), nullable=False)
+    confidence = db.Column(db.Integer, nullable=False)
+    what_worked = db.Column(db.String(1200), nullable=False, default="")
+    next_focus = db.Column(db.String(500), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class ScenarioTopic(db.Model):
     __tablename__ = "scenario_topics"
     id = db.Column(db.Integer, primary_key=True)

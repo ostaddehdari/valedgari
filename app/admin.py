@@ -13,6 +13,7 @@ from .models import (
     AssessmentQuestion,
     Child,
     ChildProfileSnapshot,
+    DailyAction,
     DecisionNode,
     DynamicForm,
     Organization,
@@ -28,7 +29,11 @@ from .models import (
     SponsoredProject,
     User,
     HomeActionOutcome,
+    MicroLesson,
+    PlanReview,
     RecommendationRun,
+    SkillDomain,
+    WeeklyPlan,
     utcnow,
 )
 from .security import admin_required
@@ -154,6 +159,8 @@ def dashboard():
         "style_assessments": ParentingStyleAssessment.query.count(),
         "recommendations": RecommendationRun.query.count(),
         "outcomes": HomeActionOutcome.query.count(),
+        "weekly_plans": WeeklyPlan.query.count(),
+        "lessons": MicroLesson.query.filter_by(status="published").count(),
     }
     recent_users = User.query.order_by(User.created_at.desc()).limit(6).all()
     return render_template("admin/dashboard.html", stats=stats, recent_users=recent_users)
@@ -447,6 +454,91 @@ def personalization_rules():
         rules=rules,
         edit_rule=edit_rule,
         skills=skills,
+        stats=stats,
+    )
+
+
+@bp.route("/learning-path", methods=["GET", "POST"])
+@login_required
+@admin_required
+def learning_path():
+    domains = SkillDomain.query.order_by(SkillDomain.sort_order).all()
+    modules = SkillModule.query.filter_by(is_published=True).order_by(SkillModule.sort_order).all()
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_lesson":
+            lesson_id = request.form.get("lesson_id", type=int)
+            lesson = db.session.get(MicroLesson, lesson_id) if lesson_id else None
+            domain = db.session.get(SkillDomain, request.form.get("domain_id", type=int))
+            module = db.session.get(SkillModule, request.form.get("module_id", type=int))
+            title = request.form.get("title", "").strip()[:180]
+            slug = make_slug(request.form.get("slug", ""))[:100]
+            objective = request.form.get("objective", "").strip()[:500]
+            body = request.form.get("body", "").strip()
+            practice = request.form.get("practice", "").strip()[:700]
+            pitfall = request.form.get("common_pitfall", "").strip()[:700]
+            status = request.form.get("status", "draft")
+            duration = max(2, min(30, request.form.get("duration", 7, type=int)))
+            duplicate = MicroLesson.query.filter_by(slug=slug).first()
+            errors = []
+            if not domain or not module:
+                errors.append("حوزه و مهارت معتبر را انتخاب کنید.")
+            if len(title) < 3 or len(body) < 20 or len(objective) < 10:
+                errors.append("عنوان، هدف و متن ریزدرس را کامل وارد کنید.")
+            if duplicate and (not lesson or duplicate.id != lesson.id):
+                errors.append("شناسه این ریزدرس قبلاً استفاده شده است.")
+            if status not in {"draft", "published"}:
+                status = "draft"
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                if not lesson:
+                    lesson = MicroLesson(slug=slug, created_by=current_user.id)
+                    db.session.add(lesson)
+                else:
+                    lesson.version += 1
+                lesson.domain_id = domain.id
+                lesson.module_id = module.id
+                lesson.title = title
+                lesson.slug = slug
+                lesson.objective = objective
+                lesson.body = body
+                lesson.practice = practice
+                lesson.common_pitfall = pitfall
+                lesson.duration = duration
+                lesson.status = status
+                db.session.commit()
+                flash(f"ریزدَرس نسخه {lesson.version} ذخیره شد.", "success")
+                return redirect(url_for("admin.learning_path"))
+        elif action == "archive_lesson":
+            lesson = db.session.get(MicroLesson, request.form.get("lesson_id", type=int))
+            if not lesson:
+                abort(404)
+            lesson.status = "archived"
+            lesson.version += 1
+            db.session.commit()
+            flash("ریزدَرس بایگانی شد؛ برنامه‌های قبلی همچنان محفوظ‌اند.", "info")
+            return redirect(url_for("admin.learning_path"))
+
+    lessons = MicroLesson.query.order_by(MicroLesson.sort_order, MicroLesson.id).all()
+    edit_lesson_id = request.args.get("edit_lesson", type=int)
+    edit_lesson = db.session.get(MicroLesson, edit_lesson_id) if edit_lesson_id else None
+    stats = {
+        "domains": len(domains),
+        "published_lessons": MicroLesson.query.filter_by(status="published").count(),
+        "active_plans": WeeklyPlan.query.filter(
+            WeeklyPlan.status.in_(["active", "awaiting_review"])
+        ).count(),
+        "completed_actions": DailyAction.query.filter_by(status="completed").count(),
+        "reviews": PlanReview.query.count(),
+    }
+    return render_template(
+        "admin/learning_path.html",
+        domains=domains,
+        modules=modules,
+        lessons=lessons,
+        edit_lesson=edit_lesson,
         stats=stats,
     )
 
