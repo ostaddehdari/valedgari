@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}پروژه‌های سازمانی | مدیریت والدیار{% endblock %}
+{% block body_class %}admin-page{% endblock %}
+{% block content %}
+<section class="admin-header">
+  <div class="container">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3">
+      <div><span class="eyebrow light">حمایت سازمانی</span><h1>پروژه‌ها و پرداخت سهمی</h1><p>مدیریت کد عضویت، سهم سازمان و والد، ظرفیت، بودجه و گزارش مالی.</p></div>
+      <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#newProject"><i class="fa-solid fa-plus ms-2"></i>پروژه جدید</button>
+    </div>
+  </div>
+</section>
+<div class="container dashboard-content">
+  <div class="row g-3 admin-stat-row">
+    {% for value, icon, label, color in [(totals.organizations,'fa-building','سازمان','teal'),(totals.projects,'fa-diagram-project','پروژه','blue'),(totals.members,'fa-user-check','عضویت فعال','coral'),('{:,}'.format(totals.committed),'fa-wallet','تعهد سازمان (تومان)','gold')] %}
+      <div class="col-6 col-lg-3"><div class="admin-stat {{ color }}"><i class="fa-solid {{ icon }}"></i><strong>{{ value }}</strong><span>{{ label }}</span></div></div>
+    {% endfor %}
+  </div>
+  <div class="panel-card mt-4" data-animate="animate__fadeInUp">
+    <div class="panel-heading"><div><span class="eyebrow">دفتر پروژه‌ها</span><h2>طرح‌های حمایت مالی</h2></div><small class="text-muted">{{ projects|length }} پروژه</small></div>
+    {% if projects %}
+      <div class="table-responsive"><table class="table align-middle admin-table project-table">
+        <thead><tr><th>پروژه / سازمان</th><th>کد</th><th>الگوی سهم</th><th>عضو</th><th>تعهد سازمان</th><th>بودجه باقی‌مانده</th><th>وضعیت</th><th></th></tr></thead>
+        <tbody>{% for project in projects %}
+          {% set split = project.calculate_split() %}
+          <tr>
+            <td><strong>{{ project.name }}</strong><small class="d-block text-muted">{{ project.organization.name }}</small></td>
+            <td><code class="support-code">{{ project.code }}</code></td>
+            <td>{% if project.pricing_model == 'percent' %}{{ project.organization_share_percent }}٪ سازمان / {{ 100-project.organization_share_percent }}٪ والد{% else %}{{ '{:,}'.format(project.organization_fixed_toman) }} تومان ثابت{% endif %}</td>
+            <td>{{ project.active_member_count }}{% if project.capacity %} / {{ project.capacity }}{% else %} / ∞{% endif %}</td>
+            <td>{{ '{:,}'.format(project.committed_subsidy_toman) }}</td>
+            <td>{{ '{:,}'.format(project.remaining_budget_toman) if project.remaining_budget_toman is not none else 'بدون سقف' }}</td>
+            <td><span class="project-status {{ project.status }}">{{ {'active':'فعال','draft':'پیش‌نویس','paused':'متوقف','closed':'بسته'}[project.status] }}</span></td>
+            <td><a class="btn btn-sm btn-outline-custom" href="{{ url_for('admin.project_detail', project_id=project.id) }}">مدیریت</a></td>
+          </tr>
+        {% endfor %}</tbody>
+      </table></div>
+    {% else %}
+      <div class="empty-state py-5"><div class="empty-icon"><i class="fa-solid fa-building-circle-check"></i></div><h2>اولین پروژه سازمانی را بسازید</h2><p>هم‌زمان سازمان، سیاست ۷۰/۳۰، کد و دفتر بودجه ایجاد می‌شود.</p><button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#newProject">ساخت پروژه</button></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="newProject" tabindex="-1" aria-labelledby="newProjectTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+  <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="modal-header"><div><span class="eyebrow mb-2">پروژه جدید</span><h2 class="modal-title fs-4" id="newProjectTitle">تعریف سازمان و سیاست حمایت</h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="بستن"></button></div>
+    <div class="modal-body"><div class="row g-4">
+      <div class="col-lg-6"><div class="form-section"><h3><i class="fa-solid fa-building ms-2"></i>سازمان</h3>
+        <label class="form-label">انتخاب سازمان موجود</label><select class="form-select" name="organization_id"><option value="">سازمان جدید</option>{% for org in organizations %}<option value="{{ org.id }}">{{ org.name }}</option>{% endfor %}</select>
+        <div class="row g-3 mt-1"><div class="col-md-6"><label class="form-label">نام سازمان جدید</label><input class="form-control" name="new_organization_name" placeholder="مثلاً شرکت نمونه"></div><div class="col-md-6"><label class="form-label">نام حقوقی</label><input class="form-control" name="legal_name"></div><div class="col-md-6"><label class="form-label">شناسه ثبت</label><input class="form-control" name="registration_no"></div><div class="col-md-6"><label class="form-label">مسئول تماس</label><input class="form-control" name="contact_name"></div><div class="col-md-6"><label class="form-label">موبایل مسئول</label><input class="form-control" name="contact_mobile" inputmode="numeric"></div></div>
+      </div></div>
+      <div class="col-lg-6"><div class="form-section"><h3><i class="fa-solid fa-ticket ms-2"></i>پروژه و کد</h3>
+        <div class="row g-3"><div class="col-md-8"><label class="form-label">عنوان پروژه *</label><input class="form-control" name="name" required placeholder="پایلوت والدگری کارکنان"></div><div class="col-md-4"><label class="form-label">کد حمایت *</label><input class="form-control text-uppercase" name="code" dir="ltr" required placeholder="ORG-70"></div><div class="col-md-6"><label class="form-label">وضعیت</label><select class="form-select" name="status"><option value="draft">پیش‌نویس</option><option value="active">فعال</option><option value="paused">متوقف</option></select></div><div class="col-md-6"><label class="form-label">خدمات مشمول، هر خط یک مورد</label><textarea class="form-control" name="eligible_services" rows="2">دسترسی والدیار</textarea></div><div class="col-12"><label class="form-label">توضیح</label><textarea class="form-control" name="description" rows="2"></textarea></div></div>
+      </div></div>
+      <div class="col-lg-7"><div class="form-section"><h3><i class="fa-solid fa-scale-balanced ms-2"></i>سیاست پرداخت</h3><div class="row g-3">
+        <div class="col-md-6"><label class="form-label">مبلغ پایه خدمت (تومان) *</label><input class="form-control money-input" name="service_price_toman" inputmode="numeric" required placeholder="1,000,000"></div>
+        <div class="col-md-6"><label class="form-label">نوع حمایت</label><select class="form-select" name="pricing_model" data-pricing-model><option value="percent">درصدی</option><option value="fixed">مبلغ ثابت</option></select></div>
+        <div class="col-md-4 percent-field"><label class="form-label">درصد سهم سازمان</label><div class="input-group"><input class="form-control" name="organization_share_percent" value="70" inputmode="numeric"><span class="input-group-text">٪</span></div></div>
+        <div class="col-md-4 fixed-field d-none"><label class="form-label">مبلغ ثابت سازمان</label><input class="form-control money-input" name="organization_fixed_toman" value="0" inputmode="numeric"></div>
+        <div class="col-md-4"><label class="form-label">سقف هر والد</label><input class="form-control money-input" name="subsidy_cap_per_parent_toman" value="0" inputmode="numeric"><div class="form-text">صفر یعنی بدون سقف جداگانه</div></div>
+        <div class="col-md-4"><label class="form-label">کل بودجه سازمان</label><input class="form-control money-input" name="total_budget_toman" value="0" inputmode="numeric"><div class="form-text">صفر یعنی بدون سقف</div></div>
+      </div></div></div>
+      <div class="col-lg-5"><div class="form-section"><h3><i class="fa-solid fa-calendar-check ms-2"></i>ظرفیت و اعتبار</h3><div class="row g-3"><div class="col-12"><label class="form-label">ظرفیت والد</label><input class="form-control" name="capacity" value="10" inputmode="numeric"></div><div class="col-6"><label class="form-label">شروع</label><input class="form-control" type="date" name="starts_on"></div><div class="col-6"><label class="form-label">پایان</label><input class="form-control" type="date" name="ends_on"></div></div></div></div>
+    </div></div>
+    <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">انصراف</button><button class="btn btn-primary-custom" type="submit"><i class="fa-solid fa-check ms-2"></i>ساخت پروژه و دفتر مالی</button></div>
+  </form>
+</div></div></div>
+{% endblock %}
+{% block scripts %}<script>$(function(){function pricing(){const fixed=$('[data-pricing-model]').val()==='fixed';$('.fixed-field').toggleClass('d-none',!fixed);$('.percent-field').toggleClass('d-none',fixed)}$('[data-pricing-model]').on('change',pricing);pricing();});</script>{% endblock %}

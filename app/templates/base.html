@@ -29,10 +29,12 @@
           <ul class="navbar-nav me-auto align-items-lg-center gap-lg-2">
             {% if current_user.is_admin %}
               <li><a class="nav-link" href="{{ url_for('admin.dashboard') }}">داشبورد مدیریت</a></li>
+              <li><a class="nav-link" href="{{ url_for('admin.projects') }}">پروژه‌های سازمانی</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.tree_builder') }}">درخت مسیر</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.form_builder') }}">فرم‌ساز</a></li>
             {% else %}
               <li><a class="nav-link" href="{{ url_for('parent.dashboard') }}">داشبورد من</a></li>
+              <li><a class="nav-link" href="{{ url_for('parent.projects') }}">حمایت سازمانی</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.skills') }}">مهارت‌ها</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.scenario') }}">موقعیت‌ها</a></li>
             {% endif %}

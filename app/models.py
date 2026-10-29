@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -23,6 +23,9 @@ class User(UserMixin, db.Model):
 
     children = db.relationship(
         "Child", backref="parent", lazy=True, cascade="all, delete-orphan"
+    )
+    project_memberships = db.relationship(
+        "ProjectMembership", backref="parent", lazy=True, cascade="all, delete-orphan"
     )
 
     @property
@@ -171,4 +174,168 @@ class FormResponse(db.Model):
     child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True)
     answers_json = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Organization(db.Model):
+    __tablename__ = "organizations"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False, index=True)
+    legal_name = db.Column(db.String(200), nullable=False, default="")
+    registration_no = db.Column(db.String(80), nullable=False, default="")
+    contact_name = db.Column(db.String(120), nullable=False, default="")
+    contact_mobile = db.Column(db.String(20), nullable=False, default="")
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    projects = db.relationship(
+        "SponsoredProject", backref="organization", lazy=True, cascade="all, delete-orphan"
+    )
+
+
+class SponsoredProject(db.Model):
+    __tablename__ = "sponsored_projects"
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(
+        db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name = db.Column(db.String(180), nullable=False)
+    code = db.Column(db.String(32), unique=True, nullable=False, index=True)
+    description = db.Column(db.String(700), nullable=False, default="")
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    pricing_model = db.Column(db.String(20), nullable=False, default="percent")
+    service_price_toman = db.Column(db.Integer, nullable=False, default=0)
+    organization_share_percent = db.Column(db.Integer, nullable=False, default=70)
+    organization_fixed_toman = db.Column(db.Integer, nullable=False, default=0)
+    subsidy_cap_per_parent_toman = db.Column(db.Integer, nullable=False, default=0)
+    total_budget_toman = db.Column(db.Integer, nullable=False, default=0)
+    capacity = db.Column(db.Integer, nullable=False, default=0)
+    starts_on = db.Column(db.Date, nullable=True)
+    ends_on = db.Column(db.Date, nullable=True)
+    eligible_services_json = db.Column(db.Text, nullable=False, default="[]")
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    memberships = db.relationship(
+        "ProjectMembership", backref="project", lazy=True, cascade="all, delete-orphan"
+    )
+    audit_logs = db.relationship(
+        "ProjectAuditLog", backref="project", lazy=True, cascade="all, delete-orphan"
+    )
+
+    @property
+    def eligible_services(self):
+        try:
+            value = json.loads(self.eligible_services_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def active_member_count(self):
+        return sum(item.status in {"active", "pending"} for item in self.memberships)
+
+    @property
+    def committed_subsidy_toman(self):
+        return sum(
+            allocation.organization_amount_toman
+            for membership in self.memberships
+            for allocation in membership.allocations
+            if allocation.status not in {"cancelled", "refunded"}
+        )
+
+    @property
+    def remaining_budget_toman(self):
+        if not self.total_budget_toman:
+            return None
+        return max(0, self.total_budget_toman - self.committed_subsidy_toman)
+
+    def calculate_split(self, amount_toman=None):
+        gross = max(0, int(amount_toman or self.service_price_toman or 0))
+        if self.pricing_model == "fixed":
+            organization_amount = self.organization_fixed_toman
+        else:
+            organization_amount = round(gross * self.organization_share_percent / 100)
+        if self.subsidy_cap_per_parent_toman:
+            organization_amount = min(organization_amount, self.subsidy_cap_per_parent_toman)
+        organization_amount = min(gross, max(0, organization_amount))
+        return gross, organization_amount, gross - organization_amount
+
+    def acceptance_problem(self, today=None):
+        today = today or date.today()
+        if self.status != "active":
+            return "این پروژه در حال حاضر فعال نیست."
+        if self.organization.status != "active":
+            return "حمایت این سازمان در حال حاضر فعال نیست."
+        if self.starts_on and today < self.starts_on:
+            return "زمان استفاده از این پروژه هنوز شروع نشده است."
+        if self.ends_on and today > self.ends_on:
+            return "اعتبار این پروژه به پایان رسیده است."
+        if self.capacity and self.active_member_count >= self.capacity:
+            return "ظرفیت این پروژه تکمیل شده است."
+        _gross, subsidy, _parent = self.calculate_split()
+        if self.remaining_budget_toman is not None and self.remaining_budget_toman < subsidy:
+            return "بودجه باقی‌مانده پروژه برای عضویت جدید کافی نیست."
+        return None
+
+
+class ProjectMembership(db.Model):
+    __tablename__ = "project_memberships"
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(
+        db.Integer, db.ForeignKey("sponsored_projects.id"), nullable=False, index=True
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    source = db.Column(db.String(40), nullable=False, default="support_code")
+    joined_code = db.Column(db.String(32), nullable=False)
+    joined_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    ended_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    allocations = db.relationship(
+        "PaymentAllocation", backref="membership", lazy=True, cascade="all, delete-orphan"
+    )
+    __table_args__ = (db.UniqueConstraint("project_id", "user_id"),)
+
+
+class PaymentAllocation(db.Model):
+    __tablename__ = "payment_allocations"
+    id = db.Column(db.Integer, primary_key=True)
+    membership_id = db.Column(
+        db.Integer, db.ForeignKey("project_memberships.id"), nullable=False, index=True
+    )
+    service_name = db.Column(db.String(180), nullable=False, default="دسترسی والدیار")
+    gross_amount_toman = db.Column(db.Integer, nullable=False)
+    organization_amount_toman = db.Column(db.Integer, nullable=False)
+    parent_amount_toman = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="reserved", index=True)
+    note = db.Column(db.String(500), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    parent_paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    organization_settled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+
+class ProjectAuditLog(db.Model):
+    __tablename__ = "project_audit_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(
+        db.Integer, db.ForeignKey("sponsored_projects.id"), nullable=False, index=True
+    )
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    details_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    @property
+    def details(self):
+        try:
+            return json.loads(self.details_json or "{}")
+        except (TypeError, ValueError):
+            return {}
 
