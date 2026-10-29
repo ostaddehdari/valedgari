@@ -53,7 +53,13 @@ install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.timer" "/etc/systemd/sys
 install -m 644 "${APP_DIR}/deploy/valedgari-logrotate" "/etc/logrotate.d/valedgari"
 chmod 750 "${APP_DIR}/deploy/backup-db.sh" "${APP_DIR}/deploy/restore-test.sh" "${APP_DIR}/deploy/healthcheck.sh"
 
-SITE_FILE="$(grep -RslE 'server_name[^;]*srun\.ir' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -n 1 || true)"
+if [[ -n "${VALEDGARI_NGINX_VHOST:-}" ]]; then
+  SITE_FILE="${VALEDGARI_NGINX_VHOST}"
+elif [[ -e /etc/nginx/sites-enabled/unified-gateway ]]; then
+  SITE_FILE="/etc/nginx/sites-enabled/unified-gateway"
+else
+  SITE_FILE="$(grep -RslE 'server_name[^;]*srun\.ir' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -n 1 || true)"
+fi
 if [[ -z "${SITE_FILE}" ]]; then
   echo "فایل server block دامنه srun.ir پیدا نشد. این خط را داخل server دامنه قرار دهید:"
   echo "include /etc/nginx/snippets/valedgari.conf;"
@@ -82,7 +88,17 @@ systemctl enable --now valedgari
 systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer valedgari-healthcheck.timer
 systemctl reload nginx
 
-sleep 2
-curl -fsS http://127.0.0.1:8010/health/ready >/dev/null
+for attempt in {1..15}; do
+  if curl -fsS http://127.0.0.1:8010/health/ready >/dev/null; then
+    break
+  fi
+  if [[ "${attempt}" -eq 15 ]]; then
+    systemctl status valedgari --no-pager --full || true
+    journalctl -u valedgari -n 120 --no-pager || true
+    echo "سرویس در مهلت تعیین‌شده آماده نشد." >&2
+    exit 1
+  fi
+  sleep 2
+done
 echo "والدیار نصب شد. اکنون مدیر را با دستور تعاملی create-admin بسازید."
 

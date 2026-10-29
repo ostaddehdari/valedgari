@@ -31,7 +31,7 @@ install -d -m 755 /var/www
 cd /var/www
 git clone https://github.com/ostaddehdari/valedgari.git
 cd /var/www/valedgari
-bash deploy/install.sh
+VALEDGARI_NGINX_VHOST=/etc/nginx/sites-enabled/unified-gateway bash deploy/install.sh
 ```
 
 اسکریپت به‌صورت idempotent محیط Python، دیتابیس، secret، Gunicorn، systemd، Nginx، بکاپ روزانه، مانور بازیابی هفتگی و health check پنج‌دقیقه‌ای را آماده می‌کند.
