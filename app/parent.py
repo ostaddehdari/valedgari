@@ -7,9 +7,12 @@ from flask_login import current_user, login_required
 
 from .extensions import db
 from .models import (
+    AssessmentInstrument,
     Child,
+    ChildProfileSnapshot,
     PaymentAllocation,
     ParentingAssessment,
+    ParentingStyleAssessment,
     ProjectAuditLog,
     ProjectMembership,
     ScenarioAttempt,
@@ -35,6 +38,66 @@ ASSESSMENT_QUESTIONS = [
     "بعد از اشتباه خودم عذرخواهی و رابطه را ترمیم می‌کنم.",
 ]
 
+PROFILE_SCALE_FIELDS = {
+    "emotional_intensity": "شدت واکنش هیجانی",
+    "adaptability": "سازگاری با تغییر",
+    "sensory_sensitivity": "حساسیت به محرک‌های محیطی",
+    "communication_openness": "آمادگی برای گفت‌وگو",
+    "persistence": "پشتکار در کارها",
+    "social_comfort": "راحتی در جمع",
+}
+PROFILE_OPTIONS = {
+    "strengths": {
+        "empathy": "همدلی",
+        "creativity": "خلاقیت",
+        "responsibility": "مسئولیت‌پذیری",
+        "persistence": "پشتکار",
+        "humor": "شوخ‌طبعی",
+        "learning": "علاقه به یادگیری",
+    },
+    "triggers": {
+        "direct_pressure": "فشار و دستور مستقیم",
+        "sudden_change": "تغییر ناگهانی برنامه",
+        "fatigue": "خستگی یا گرسنگی",
+        "screen_limit": "محدودشدن موبایل و بازی",
+        "criticism": "انتقاد یا مقایسه",
+        "sibling_conflict": "تعارض با خواهر یا برادر",
+    },
+    "calming": {
+        "quiet_space": "فضای آرام و خلوت",
+        "conversation": "گفت‌وگوی آرام",
+        "movement": "حرکت و فعالیت بدنی",
+        "time": "زمان کوتاه برای فروکش هیجان",
+        "connection": "تماس عاطفی و اطمینان‌بخشی",
+        "structured_choice": "دادن دو انتخاب محدود",
+    },
+    "priorities": {
+        "anger": "خشم و تعارض",
+        "screen": "موبایل و فضای مجازی",
+        "school": "درس و مدرسه",
+        "motivation": "انگیزه و مسئولیت",
+        "honesty": "صداقت و اعتماد",
+        "friends": "دوستان و ارتباط اجتماعی",
+    },
+}
+ANGER_PATTERNS = {
+    "explosion": "واکنش سریع و پرصدا",
+    "withdrawal": "کناره‌گیری و سکوت",
+    "crying": "گریه و درماندگی",
+    "arguing": "بحث طولانی و چانه‌زنی",
+    "mixed": "الگوی متغیر بر اساس موقعیت",
+}
+RELATIONSHIP_QUESTIONS = [
+    "نشانه‌های اولیه ناراحتی این فرزند را قبل از اوج تنش تشخیص می‌دهم.",
+    "می‌دانم چه زمان و فضایی برای گفت‌وگو با او مناسب‌تر است.",
+    "قوانین خانه برای این فرزند روشن و قابل پیش‌بینی است.",
+    "در زمان تعارض می‌توانم پیش از واکنش کمی مکث کنم.",
+    "این فرزند معمولاً احساس می‌کند حرفش شنیده شده است.",
+    "بعد از تعارض برای ترمیم رابطه قدم مشخصی برمی‌داریم.",
+    "می‌دانم چه چیزهایی او را آرام‌تر یا برانگیخته‌تر می‌کند.",
+    "برای حل مسئله می‌توانیم به یک توافق کوچک و قابل اجرا برسیم.",
+]
+
 
 def normalize_support_code(value):
     translation = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -49,6 +112,68 @@ def owned_child(child_id=None):
     if not child or child.user_id != current_user.id:
         abort(404)
     return child
+
+
+def latest_profile_snapshot(child_id, profile_type):
+    return (
+        ChildProfileSnapshot.query.filter_by(
+            user_id=current_user.id,
+            child_id=child_id,
+            profile_type=profile_type,
+        )
+        .order_by(ChildProfileSnapshot.version_no.desc())
+        .first()
+    )
+
+
+def allowed_multi_values(field_name):
+    allowed = PROFILE_OPTIONS[field_name]
+    return [item for item in request.form.getlist(field_name) if item in allowed]
+
+
+def style_interpretation(style_key, label):
+    notes = {
+        "authoritative": "این الگو معمولاً بر گرمی رابطه همراه با مرز روشن تأکید دارد.",
+        "authoritarian": "این نتیجه نشان می‌دهد بررسی میزان کنترل، گفت‌وگو و انعطاف می‌تواند مفید باشد.",
+        "permissive": "این نتیجه نشان می‌دهد روشن‌ترکردن مرزها و پیگیری پیامدها می‌تواند مفید باشد.",
+    }
+    return (
+        f"بالاترین امتیاز این اجرا در بُعد «{label}» است. "
+        f"{notes.get(style_key, 'نتیجه باید همراه با شرایط رابطه و پاسخ‌های همان فرزند تفسیر شود')} "
+        "این خروجی تشخیص یا برچسب ثابت نیست."
+    )
+
+
+def calculate_style_scores(instrument, form_data):
+    schema = instrument.scoring_schema
+    scale_min = int(schema.get("scale_min", 1))
+    scale_max = int(schema.get("scale_max", 5))
+    dimensions = schema.get("dimensions", {})
+    totals = {key: {"sum": 0.0, "weight": 0.0} for key in dimensions}
+    answers = {}
+    for question in instrument.questions:
+        try:
+            value = int(form_data.get(f"q_{question.id}", "0"))
+        except (TypeError, ValueError):
+            value = 0
+        if question.is_required and not scale_min <= value <= scale_max:
+            return None, None, "لطفاً به همه گزاره‌های الزامی پاسخ دهید."
+        if not value:
+            continue
+        answers[str(question.id)] = value
+        scored_value = scale_max + scale_min - value if question.reverse_score else value
+        if question.dimension not in totals:
+            totals[question.dimension] = {"sum": 0.0, "weight": 0.0}
+        totals[question.dimension]["sum"] += scored_value * question.weight
+        totals[question.dimension]["weight"] += question.weight
+    scores = {}
+    for key, item in totals.items():
+        if not item["weight"]:
+            scores[key] = 0
+            continue
+        mean = item["sum"] / item["weight"]
+        scores[key] = round((mean - scale_min) / (scale_max - scale_min) * 100)
+    return answers, scores, None
 
 
 @bp.get("/")
@@ -73,12 +198,190 @@ def dashboard():
         ProjectMembership.user_id == current_user.id,
         ProjectMembership.status.in_(["active", "pending"]),
     ).all()
+    child_profile = latest_profile_snapshot(child.id, "initial") if child else None
+    relationship_profile = latest_profile_snapshot(child.id, "relationship") if child else None
+    style_result = None
+    if child:
+        style_result = (
+            ParentingStyleAssessment.query.filter_by(
+                user_id=current_user.id, child_id=child.id
+            )
+            .order_by(ParentingStyleAssessment.created_at.desc())
+            .first()
+        )
     return render_template(
         "parent/dashboard.html",
         child=child,
         assessment=assessment,
         completed=completed,
         sponsored_memberships=sponsored_memberships,
+        child_profile=child_profile,
+        relationship_profile=relationship_profile,
+        style_result=style_result,
+    )
+
+
+@bp.route("/child-profile", methods=["GET", "POST"])
+@login_required
+def child_profile():
+    child = owned_child()
+    if not child:
+        flash("ابتدا پرونده یک فرزند را بسازید.", "warning")
+        return redirect(url_for("parent.children"))
+    if request.method == "POST":
+        profile_type = request.form.get("profile_type")
+        previous = latest_profile_snapshot(child.id, profile_type)
+        version_no = (previous.version_no + 1) if previous else 1
+        if profile_type == "initial":
+            scales = {}
+            for key in PROFILE_SCALE_FIELDS:
+                value = request.form.get(key, type=int)
+                if value not in range(1, 6):
+                    flash("لطفاً به همه مقیاس‌های شناخت فرزند پاسخ دهید.", "danger")
+                    return redirect(url_for("parent.child_profile", tab="initial"))
+                scales[key] = value
+            anger_pattern = request.form.get("anger_pattern", "")
+            strengths = allowed_multi_values("strengths")
+            triggers = allowed_multi_values("triggers")
+            calming = allowed_multi_values("calming")
+            priorities = allowed_multi_values("priorities")
+            if anger_pattern not in ANGER_PATTERNS or not strengths or not triggers or not calming or not priorities:
+                flash("در هر بخش دست‌کم یک گزینه و الگوی واکنش را مشخص کنید.", "danger")
+                return redirect(url_for("parent.child_profile", tab="initial"))
+            answers = {
+                "scales": scales,
+                "strengths": strengths,
+                "triggers": triggers,
+                "calming": calming,
+                "priorities": priorities,
+                "anger_pattern": anger_pattern,
+                "parent_notes": request.form.get("parent_notes", "").strip()[:1200],
+            }
+            first_calming = PROFILE_OPTIONS["calming"][calming[0]]
+            first_trigger = PROFILE_OPTIONS["triggers"][triggers[0]]
+            summary = {
+                "strengths": [PROFILE_OPTIONS["strengths"][key] for key in strengths],
+                "triggers": [PROFILE_OPTIONS["triggers"][key] for key in triggers],
+                "calming": [PROFILE_OPTIONS["calming"][key] for key in calming],
+                "priorities": [PROFILE_OPTIONS["priorities"][key] for key in priorities],
+                "anger_pattern": ANGER_PATTERNS[anger_pattern],
+                "action_hint": (
+                    f"در شروع تنش، محرک «{first_trigger}» را بررسی کنید و پیش از حل مسئله "
+                    f"از «{first_calming}» کمک بگیرید."
+                ),
+            }
+            source_version = "child-profile-internal-1"
+        elif profile_type == "relationship":
+            answers_list = []
+            for index in range(len(RELATIONSHIP_QUESTIONS)):
+                value = request.form.get(f"r{index}", type=int)
+                if value not in range(1, 6):
+                    flash("لطفاً به همه گزاره‌های رابطه پاسخ دهید.", "danger")
+                    return redirect(url_for("parent.child_profile", tab="relationship"))
+                answers_list.append(value)
+            score = round(sum(answers_list) / (len(answers_list) * 5) * 100)
+            if score >= 80:
+                level = "پیوند و همکاری پایدار"
+                hint = "همین الگوی گفت‌وگو و ترمیم را در موقعیت‌های دشوار نیز پیوسته نگه دارید."
+            elif score >= 60:
+                level = "پایه مناسب با چند نقطه قابل تقویت"
+                hint = "یک نشانه اولیه تنش و یک زمان مناسب گفت‌وگو را این هفته ثبت کنید."
+            elif score >= 40:
+                level = "نیازمند تمرین هدفمند"
+                hint = "از مکث والد و شنیدن احساس فرزند به‌عنوان دو قدم نخست شروع کنید."
+            else:
+                level = "شروع بازسازی ارتباط"
+                hint = "فعلاً هدف را کوچک کنید: کاهش تنش و ساخت یک گفت‌وگوی کوتاه و امن."
+            answers = {"items": answers_list}
+            summary = {"score": score, "level": level, "action_hint": hint}
+            source_version = "relationship-internal-1"
+        else:
+            abort(400)
+        snapshot = ChildProfileSnapshot(
+            user_id=current_user.id,
+            child_id=child.id,
+            profile_type=profile_type,
+            version_no=version_no,
+            answers_json=json.dumps(answers, ensure_ascii=False),
+            summary_json=json.dumps(summary, ensure_ascii=False),
+            source_version=source_version,
+        )
+        db.session.add(snapshot)
+        db.session.commit()
+        flash(f"نمای {child.name} با نسخه {version_no} ذخیره شد.", "success")
+        return redirect(url_for("parent.child_profile", tab="summary"))
+
+    initial = latest_profile_snapshot(child.id, "initial")
+    relationship = latest_profile_snapshot(child.id, "relationship")
+    history = ChildProfileSnapshot.query.filter_by(
+        user_id=current_user.id, child_id=child.id
+    ).order_by(ChildProfileSnapshot.created_at.desc()).all()
+    return render_template(
+        "parent/child_profile.html",
+        child=child,
+        initial=initial,
+        relationship=relationship,
+        history=history,
+        scale_fields=PROFILE_SCALE_FIELDS,
+        profile_options=PROFILE_OPTIONS,
+        anger_patterns=ANGER_PATTERNS,
+        relationship_questions=RELATIONSHIP_QUESTIONS,
+        active_tab=request.args.get("tab", "summary"),
+    )
+
+
+@bp.route("/parenting-style", methods=["GET", "POST"])
+@login_required
+def parenting_style():
+    child = owned_child()
+    if not child:
+        flash("ابتدا پرونده یک فرزند را بسازید.", "warning")
+        return redirect(url_for("parent.children"))
+    instrument = AssessmentInstrument.query.filter_by(
+        framework_slug="baumrind", status="published"
+    ).order_by(AssessmentInstrument.approved_at.desc()).first()
+    if request.method == "POST":
+        if not instrument:
+            flash("نسخه علمی پرسش‌نامه هنوز منتشر نشده است.", "warning")
+            return redirect(url_for("parent.parenting_style"))
+        answers, scores, error = calculate_style_scores(instrument, request.form)
+        if error:
+            flash(error, "danger")
+        else:
+            dominant_key = max(scores, key=scores.get)
+            dimensions = instrument.scoring_schema.get("dimensions", {})
+            dominant_label = dimensions.get(dominant_key, dominant_key)
+            result = ParentingStyleAssessment(
+                instrument_id=instrument.id,
+                user_id=current_user.id,
+                child_id=child.id,
+                answers_json=json.dumps(answers, ensure_ascii=False),
+                scores_json=json.dumps(scores, ensure_ascii=False),
+                dominant_style=dominant_label,
+                interpretation=style_interpretation(dominant_key, dominant_label),
+                instrument_version=instrument.version,
+            )
+            db.session.add(result)
+            db.session.commit()
+            flash(f"سنجش سبک در رابطه با {child.name} ذخیره شد.", "success")
+            return redirect(url_for("parent.parenting_style"))
+    latest = (
+        ParentingStyleAssessment.query.filter_by(
+            user_id=current_user.id, child_id=child.id
+        )
+        .order_by(ParentingStyleAssessment.created_at.desc())
+        .first()
+    )
+    history = ParentingStyleAssessment.query.filter_by(
+        user_id=current_user.id, child_id=child.id
+    ).order_by(ParentingStyleAssessment.created_at.desc()).all()
+    return render_template(
+        "parent/parenting_style.html",
+        child=child,
+        instrument=instrument,
+        latest=latest,
+        history=history,
+        dimensions=instrument.scoring_schema.get("dimensions", {}) if instrument else {},
     )
 
 

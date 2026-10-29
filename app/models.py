@@ -339,3 +339,122 @@ class ProjectAuditLog(db.Model):
         except (TypeError, ValueError):
             return {}
 
+
+class AssessmentInstrument(db.Model):
+    __tablename__ = "assessment_instruments"
+    id = db.Column(db.Integer, primary_key=True)
+    framework_slug = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    version = db.Column(db.String(40), nullable=False, default="draft-1")
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    source_reference = db.Column(db.String(500), nullable=False, default="")
+    license_note = db.Column(db.String(500), nullable=False, default="")
+    scoring_schema_json = db.Column(db.Text, nullable=False, default="{}")
+    disclaimer = db.Column(db.String(700), nullable=False, default="")
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    questions = db.relationship(
+        "AssessmentQuestion",
+        backref="instrument",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="AssessmentQuestion.sort_order",
+    )
+    results = db.relationship(
+        "ParentingStyleAssessment",
+        backref="instrument",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def scoring_schema(self):
+        try:
+            value = json.loads(self.scoring_schema_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def is_published(self):
+        return self.status == "published"
+
+
+class AssessmentQuestion(db.Model):
+    __tablename__ = "assessment_questions"
+    id = db.Column(db.Integer, primary_key=True)
+    instrument_id = db.Column(
+        db.Integer, db.ForeignKey("assessment_instruments.id"), nullable=False, index=True
+    )
+    code = db.Column(db.String(60), nullable=False)
+    text = db.Column(db.String(700), nullable=False)
+    dimension = db.Column(db.String(80), nullable=False, index=True)
+    weight = db.Column(db.Float, nullable=False, default=1.0)
+    reverse_score = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    is_required = db.Column(db.Boolean, nullable=False, default=True)
+    __table_args__ = (db.UniqueConstraint("instrument_id", "code"),)
+
+
+class ParentingStyleAssessment(db.Model):
+    __tablename__ = "parenting_style_assessments"
+    id = db.Column(db.Integer, primary_key=True)
+    instrument_id = db.Column(
+        db.Integer, db.ForeignKey("assessment_instruments.id"), nullable=False, index=True
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    answers_json = db.Column(db.Text, nullable=False)
+    scores_json = db.Column(db.Text, nullable=False)
+    dominant_style = db.Column(db.String(80), nullable=False)
+    interpretation = db.Column(db.String(700), nullable=False, default="")
+    instrument_version = db.Column(db.String(40), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    child = db.relationship("Child")
+
+    @property
+    def scores(self):
+        try:
+            return json.loads(self.scores_json or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+
+class ChildProfileSnapshot(db.Model):
+    __tablename__ = "child_profile_snapshots"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    profile_type = db.Column(db.String(30), nullable=False, index=True)
+    version_no = db.Column(db.Integer, nullable=False, default=1)
+    answers_json = db.Column(db.Text, nullable=False)
+    summary_json = db.Column(db.Text, nullable=False, default="{}")
+    source_version = db.Column(db.String(40), nullable=False, default="internal-1")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    child = db.relationship("Child")
+    __table_args__ = (
+        db.UniqueConstraint("child_id", "profile_type", "version_no"),
+    )
+
+    @property
+    def answers(self):
+        try:
+            return json.loads(self.answers_json or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def summary(self):
+        try:
+            return json.loads(self.summary_json or "{}")
+        except (TypeError, ValueError):
+            return {}
+

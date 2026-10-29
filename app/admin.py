@@ -9,12 +9,16 @@ from flask_login import current_user, login_required
 
 from .extensions import db
 from .models import (
+    AssessmentInstrument,
+    AssessmentQuestion,
     Child,
+    ChildProfileSnapshot,
     DecisionNode,
     DynamicForm,
     Organization,
     PaymentAllocation,
     ParentingAssessment,
+    ParentingStyleAssessment,
     ProjectAuditLog,
     ProjectMembership,
     ScenarioLevel,
@@ -142,9 +146,157 @@ def dashboard():
         "topics": ScenarioTopic.query.count(),
         "forms": DynamicForm.query.count(),
         "projects": SponsoredProject.query.count(),
+        "profiles": ChildProfileSnapshot.query.count(),
+        "style_assessments": ParentingStyleAssessment.query.count(),
     }
     recent_users = User.query.order_by(User.created_at.desc()).limit(6).all()
     return render_template("admin/dashboard.html", stats=stats, recent_users=recent_users)
+
+
+def instrument_publish_errors(instrument):
+    errors = []
+    dimensions = set(instrument.scoring_schema.get("dimensions", {}).keys())
+    question_dimensions = {item.dimension for item in instrument.questions}
+    if not instrument.source_reference.strip():
+        errors.append("منبع دقیق نسخه پرسش‌نامه ثبت نشده است.")
+    if not instrument.license_note.strip():
+        errors.append("وضعیت مجوز استفاده و ترجمه ثبت نشده است.")
+    if len(instrument.questions) < 6:
+        errors.append("برای انتشار دست‌کم ۶ سؤال معتبر لازم است.")
+    if dimensions and not dimensions.issubset(question_dimensions):
+        errors.append("برای همه ابعاد تعریف‌شده باید سؤال وجود داشته باشد.")
+    return errors
+
+
+@bp.route("/assessments/baumrind", methods=["GET", "POST"])
+@login_required
+@admin_required
+def baumrind_instrument():
+    instrument = AssessmentInstrument.query.filter_by(framework_slug="baumrind").order_by(
+        AssessmentInstrument.created_at.desc()
+    ).first()
+    if not instrument:
+        instrument = AssessmentInstrument(
+            framework_slug="baumrind",
+            title="چارچوب سبک‌های فرزندپروری بامریند",
+            version="awaiting-scientific-approval",
+            created_by=current_user.id,
+        )
+        db.session.add(instrument)
+        db.session.commit()
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_metadata":
+            instrument.title = request.form.get("title", "").strip()[:180]
+            instrument.version = request.form.get("version", "").strip()[:40]
+            instrument.source_reference = request.form.get("source_reference", "").strip()[:500]
+            instrument.license_note = request.form.get("license_note", "").strip()[:500]
+            instrument.disclaimer = request.form.get("disclaimer", "").strip()[:700]
+            if not instrument.created_by:
+                instrument.created_by = current_user.id
+            if not instrument.title or not instrument.version:
+                flash("عنوان و نسخه ابزار الزامی است.", "danger")
+            else:
+                if instrument.status == "published":
+                    instrument.status = "review"
+                    instrument.approved_by = None
+                    instrument.approved_at = None
+                db.session.commit()
+                flash("مشخصات علمی ابزار ذخیره شد؛ تغییر ابزار نیازمند انتشار دوباره است.", "success")
+                return redirect(url_for("admin.baumrind_instrument"))
+        elif action == "import_questions":
+            try:
+                payload = json.loads(request.form.get("questions_json", "[]"))
+            except ValueError:
+                payload = None
+            dimensions = set(instrument.scoring_schema.get("dimensions", {}).keys())
+            errors = []
+            normalized = []
+            if not isinstance(payload, list):
+                errors.append("ساختار JSON باید یک آرایه از سؤال‌ها باشد.")
+            else:
+                seen_codes = set()
+                for index, item in enumerate(payload, 1):
+                    if not isinstance(item, dict):
+                        errors.append(f"ردیف {index} ساختار معتبر ندارد.")
+                        continue
+                    code = re.sub(r"[^a-zA-Z0-9_-]", "", str(item.get("code", "")))[:60]
+                    text_value = str(item.get("text", "")).strip()[:700]
+                    dimension = str(item.get("dimension", "")).strip()
+                    try:
+                        weight = float(item.get("weight", 1))
+                    except (TypeError, ValueError):
+                        weight = 0
+                    if not code or code in seen_codes:
+                        errors.append(f"کد سؤال در ردیف {index} خالی یا تکراری است.")
+                    if len(text_value) < 5:
+                        errors.append(f"متن سؤال ردیف {index} کافی نیست.")
+                    if dimension not in dimensions:
+                        errors.append(f"بُعد سؤال ردیف {index} معتبر نیست.")
+                    if weight <= 0:
+                        errors.append(f"وزن سؤال ردیف {index} باید مثبت باشد.")
+                    seen_codes.add(code)
+                    normalized.append(
+                        {
+                            "code": code,
+                            "text": text_value,
+                            "dimension": dimension,
+                            "weight": weight,
+                            "reverse_score": bool(item.get("reverse_score", False)),
+                            "is_required": bool(item.get("is_required", True)),
+                        }
+                    )
+            if errors:
+                for error in errors[:12]:
+                    flash(error, "danger")
+            else:
+                for question in list(instrument.questions):
+                    db.session.delete(question)
+                db.session.flush()
+                for order, item in enumerate(normalized, 1):
+                    db.session.add(
+                        AssessmentQuestion(
+                            instrument_id=instrument.id,
+                            sort_order=order,
+                            **item,
+                        )
+                    )
+                instrument.status = "review"
+                instrument.approved_by = None
+                instrument.approved_at = None
+                db.session.commit()
+                flash(f"{len(normalized)} سؤال وارد و ابزار به وضعیت بازبینی منتقل شد.", "success")
+                return redirect(url_for("admin.baumrind_instrument"))
+        elif action == "publish":
+            errors = instrument_publish_errors(instrument)
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                instrument.status = "published"
+                instrument.approved_by = current_user.id
+                instrument.approved_at = utcnow()
+                db.session.commit()
+                flash("نسخه تأیید و برای والدین منتشر شد.", "success")
+                return redirect(url_for("admin.baumrind_instrument"))
+        elif action == "unpublish":
+            instrument.status = "review"
+            instrument.approved_by = None
+            instrument.approved_at = None
+            db.session.commit()
+            flash("انتشار ابزار متوقف شد؛ نتایج قبلی با نسخه خود حفظ می‌شوند.", "info")
+            return redirect(url_for("admin.baumrind_instrument"))
+
+    dimensions = instrument.scoring_schema.get("dimensions", {})
+    usage_count = ParentingStyleAssessment.query.filter_by(instrument_id=instrument.id).count()
+    return render_template(
+        "admin/baumrind_instrument.html",
+        instrument=instrument,
+        dimensions=dimensions,
+        usage_count=usage_count,
+        publish_errors=instrument_publish_errors(instrument),
+    )
 
 
 @bp.route("/projects", methods=["GET", "POST"])

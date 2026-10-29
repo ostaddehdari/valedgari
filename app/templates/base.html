@@ -30,11 +30,14 @@
             {% if current_user.is_admin %}
               <li><a class="nav-link" href="{{ url_for('admin.dashboard') }}">داشبورد مدیریت</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.projects') }}">پروژه‌های سازمانی</a></li>
+              <li><a class="nav-link" href="{{ url_for('admin.baumrind_instrument') }}">ابزار بامریند</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.tree_builder') }}">درخت مسیر</a></li>
               <li><a class="nav-link" href="{{ url_for('admin.form_builder') }}">فرم‌ساز</a></li>
             {% else %}
               <li><a class="nav-link" href="{{ url_for('parent.dashboard') }}">داشبورد من</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.projects') }}">حمایت سازمانی</a></li>
+              <li><a class="nav-link" href="{{ url_for('parent.child_profile') }}">نمای فرزند</a></li>
+              <li><a class="nav-link" href="{{ url_for('parent.parenting_style') }}">سبک والدگری</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.skills') }}">مهارت‌ها</a></li>
               <li><a class="nav-link" href="{{ url_for('parent.scenario') }}">موقعیت‌ها</a></li>
             {% endif %}

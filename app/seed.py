@@ -1,5 +1,7 @@
 from .extensions import db
-from .models import ScenarioLevel, ScenarioTopic, SkillModule
+import json
+
+from .models import AssessmentInstrument, ScenarioLevel, ScenarioTopic, SkillModule
 
 
 SKILLS = [
@@ -31,6 +33,33 @@ LEVELS = [
 
 
 def seed_content():
+    if not AssessmentInstrument.query.filter_by(framework_slug="baumrind").first():
+        db.session.add(
+            AssessmentInstrument(
+                framework_slug="baumrind",
+                title="چارچوب سبک‌های فرزندپروری بامریند",
+                version="awaiting-scientific-approval",
+                status="draft",
+                scoring_schema_json=json.dumps(
+                    {
+                        "scale_min": 1,
+                        "scale_max": 5,
+                        "method": "weighted_mean_percent",
+                        "dimensions": {
+                            "authoritative": "مقتدرانه",
+                            "authoritarian": "مستبدانه",
+                            "permissive": "سهل‌گیرانه",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                disclaimer=(
+                    "این نتیجه برای آموزش و خودبازنگری است و تشخیص بالینی یا برچسب ثابت "
+                    "برای والد محسوب نمی‌شود."
+                ),
+            )
+        )
+
     if SkillModule.query.count() == 0:
         for order, item in enumerate(SKILLS, 1):
             slug, title, description, icon, duration = item

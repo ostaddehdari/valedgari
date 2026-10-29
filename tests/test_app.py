@@ -1,8 +1,14 @@
+import json
+
 from app.extensions import db
 from app.models import (
+    AssessmentInstrument,
+    AssessmentQuestion,
     Child,
+    ChildProfileSnapshot,
     Organization,
     ParentingAssessment,
+    ParentingStyleAssessment,
     PaymentAllocation,
     ProjectAuditLog,
     ProjectMembership,
@@ -79,6 +85,7 @@ def test_admin_can_open_builders(client):
     assert client.get("/admin/tree").status_code == 200
     assert client.get("/admin/forms").status_code == 200
     assert client.get("/admin/projects").status_code == 200
+    assert client.get("/admin/assessments/baumrind").status_code == 200
 
 
 def create_sponsored_project(client, capacity="10", budget="7000000"):
@@ -183,4 +190,146 @@ def test_admin_financial_status_and_csv_report(client, app):
 def test_parent_cannot_open_project_admin(client):
     login(client)
     assert client.get("/admin/projects").status_code == 403
+
+
+def initial_profile_payload():
+    return {
+        "profile_type": "initial",
+        "emotional_intensity": "4",
+        "adaptability": "3",
+        "sensory_sensitivity": "4",
+        "communication_openness": "3",
+        "persistence": "5",
+        "social_comfort": "2",
+        "anger_pattern": "withdrawal",
+        "strengths": ["empathy", "persistence"],
+        "triggers": ["direct_pressure", "sudden_change"],
+        "calming": ["quiet_space", "time"],
+        "priorities": ["anger", "school"],
+        "parent_notes": "در تغییر برنامه به زمان بیشتری نیاز دارد.",
+    }
+
+
+def test_child_profile_is_versioned_and_isolated(client, app):
+    login(client)
+    client.post(
+        "/dashboard/children",
+        data={"name": "سارا", "birth_year": "1392", "gender": "girl"},
+    )
+    first = client.post("/dashboard/child-profile", data=initial_profile_payload())
+    second = client.post("/dashboard/child-profile", data=initial_profile_payload())
+    relationship = client.post(
+        "/dashboard/child-profile",
+        data={"profile_type": "relationship", **{f"r{i}": "4" for i in range(8)}},
+    )
+    assert first.status_code == second.status_code == relationship.status_code == 302
+    with app.app_context():
+        sara = Child.query.filter_by(name="سارا").one()
+        initial = ChildProfileSnapshot.query.filter_by(
+            child_id=sara.id, profile_type="initial"
+        ).order_by(ChildProfileSnapshot.version_no).all()
+        assert [item.version_no for item in initial] == [1, 2]
+        assert initial[-1].summary["anger_pattern"] == "کناره‌گیری و سکوت"
+        relation = ChildProfileSnapshot.query.filter_by(
+            child_id=sara.id, profile_type="relationship"
+        ).one()
+        assert relation.summary["score"] == 80
+    client.post(
+        "/dashboard/children",
+        data={"name": "علی", "birth_year": "1390", "gender": "boy"},
+    )
+    page = client.get("/dashboard/child-profile")
+    assert page.status_code == 200
+    assert "نمای علی هنوز ساخته نشده است" in page.get_data(as_text=True)
+
+
+def approved_baumrind_questions():
+    questions = []
+    for dimension, prefix in (
+        ("authoritative", "A"),
+        ("authoritarian", "R"),
+        ("permissive", "P"),
+    ):
+        for index in range(1, 3):
+            questions.append(
+                {
+                    "code": f"{prefix}{index}",
+                    "text": f"گزاره آزمایشی تأییدشده {prefix}{index}",
+                    "dimension": dimension,
+                    "weight": 1,
+                    "reverse_score": False,
+                    "is_required": True,
+                }
+            )
+    return questions
+
+
+def publish_test_baumrind(client):
+    login(client, mobile="09120000001", password="AdminPass123")
+    client.post(
+        "/admin/assessments/baumrind",
+        data={
+            "action": "save_metadata",
+            "title": "نسخه آزمون تأییدشده",
+            "version": "test-1",
+            "source_reference": "منبع علمی نمونه برای تست نرم‌افزار",
+            "license_note": "مجوز نمونه فقط برای تست خودکار",
+            "disclaimer": "این نتیجه تشخیص بالینی نیست.",
+        },
+    )
+    client.post(
+        "/admin/assessments/baumrind",
+        data={
+            "action": "import_questions",
+            "questions_json": json.dumps(approved_baumrind_questions(), ensure_ascii=False),
+        },
+    )
+    response = client.post(
+        "/admin/assessments/baumrind", data={"action": "publish"}
+    )
+    assert response.status_code == 302
+    assert client.get("/admin/assessments/baumrind").status_code == 200
+    client.post("/auth/logout")
+
+
+def test_baumrind_scoring_is_versioned_per_child(client, app):
+    publish_test_baumrind(client)
+    login(client)
+    client.post(
+        "/dashboard/children",
+        data={"name": "زهرا", "birth_year": "1391", "gender": "girl"},
+    )
+    with app.app_context():
+        instrument = AssessmentInstrument.query.filter_by(status="published").one()
+        values = {
+            f"q_{question.id}": "5" if question.dimension == "authoritative" else "1"
+            for question in instrument.questions
+        }
+        assert len(instrument.questions) == 6
+    response = client.post("/dashboard/parenting-style", data=values)
+    assert response.status_code == 302
+    assert client.get("/dashboard/parenting-style").status_code == 200
+    with app.app_context():
+        result = ParentingStyleAssessment.query.one()
+        assert result.child.name == "زهرا"
+        assert result.instrument_version == "test-1"
+        assert result.dominant_style == "مقتدرانه"
+        assert result.scores == {
+            "authoritative": 100,
+            "authoritarian": 0,
+            "permissive": 0,
+        }
+
+
+def test_baumrind_cannot_publish_without_scientific_gate(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/assessments/baumrind",
+        data={"action": "publish"},
+        follow_redirects=True,
+    )
+    assert "منبع دقیق نسخه پرسش‌نامه ثبت نشده است" in response.get_data(as_text=True)
+    with app.app_context():
+        assert AssessmentInstrument.query.one().status == "draft"
+        assert AssessmentQuestion.query.count() == 0
 
