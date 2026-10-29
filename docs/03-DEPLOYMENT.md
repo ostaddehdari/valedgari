@@ -36,6 +36,8 @@ VALEDGARI_NGINX_VHOST=/etc/nginx/sites-enabled/unified-gateway bash deploy/insta
 
 اسکریپت به‌صورت idempotent محیط Python، دیتابیس، secret، Gunicorn، systemd، Nginx، بکاپ روزانه، مانور بازیابی هفتگی و health check پنج‌دقیقه‌ای را آماده می‌کند.
 
+نسخه پشتیبان تنظیمات Nginx در `/var/backups/valedgari/nginx/` ذخیره می‌شود و هرگز داخل `sites-enabled` قرار نمی‌گیرد.
+
 اگر server block دامنه خودکار پیدا نشد، این خط را داخل بلوک `server` مربوط به `srun.ir` اضافه کنید:
 
 ```nginx

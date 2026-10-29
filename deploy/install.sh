@@ -66,7 +66,9 @@ if [[ -z "${SITE_FILE}" ]]; then
 else
   TARGET_FILE="$(readlink -f "${SITE_FILE}")"
   if ! grep -qF 'include /etc/nginx/snippets/valedgari.conf;' "${TARGET_FILE}"; then
-    cp -a "${TARGET_FILE}" "${TARGET_FILE}.before-valedgari"
+    NGINX_BACKUP_DIR="/var/backups/valedgari/nginx"
+    install -d -o root -g root -m 700 "${NGINX_BACKUP_DIR}"
+    cp -a "${TARGET_FILE}" "${NGINX_BACKUP_DIR}/$(basename "${TARGET_FILE}").$(date -u +%Y%m%dT%H%M%SZ).bak"
     python3 - "${TARGET_FILE}" <<'PY'
 from pathlib import Path
 import sys
