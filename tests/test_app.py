@@ -11,6 +11,13 @@ from app.models import (
     Child,
     ChildProfileSnapshot,
     ConsentRecord,
+    Course,
+    CourseChapter,
+    CourseEnrollment,
+    CourseSkillMembership,
+    CourseTopicMembership,
+    CourseUnit,
+    CourseUnitProgress,
     ContractBeneficiary,
     DataDeletionRequest,
     DailyAction,
@@ -39,11 +46,13 @@ from app.models import (
     ScientificReview,
     ScenarioTopic,
     SkillDomain,
+    SkillModule,
     SkillProgress,
     SponsoredProject,
     User,
     WeeklyPlan,
 )
+from app.course_engine import parse_course_structure, recommended_courses
 from app.form_engine import (
     AI_CONTRACT,
     FIELD_TYPES,
@@ -1773,4 +1782,254 @@ def test_admin_media_upload_is_private_and_rejects_disguised_file(client, app):
         asset_id = asset.id
         assert asset.storage_name != "safe.pdf"
     assert client.get(f"/admin/forms/media/{asset_id}").status_code == 200
+
+
+def course_builder_payload(action="publish", slug="new-parent-course", structure=None):
+    structure = structure or [
+        {
+            "id": None,
+            "title": "فصل اول",
+            "description": "شروع مسیر",
+            "units": [
+                {
+                    "id": None,
+                    "title": "درس آغازین",
+                    "type": "text",
+                    "body": "محتوای آموزشی کاربردی برای والدین",
+                    "source_url": "",
+                    "duration": 8,
+                    "is_preview": True,
+                    "form_id": None,
+                }
+            ],
+        }
+    ]
+    return {
+        "action": action,
+        "title": "دوره جدید والدگری",
+        "slug": slug,
+        "subtitle": "یک مسیر آموزشی کوتاه",
+        "description": "شرح کامل و کاربردی دوره برای والدین و خانواده‌ها",
+        "instructor_name": "مدرس نمونه",
+        "level": "foundation",
+        "duration_minutes": "90",
+        "price_toman": "0",
+        "sort_order": "4",
+        "is_featured": "1",
+        "style_tags": ["general", "authoritative"],
+        "structure_json": json.dumps(structure, ensure_ascii=False),
+    }
+
+
+def test_stage_eleven_seeds_courses_with_skills_topics_and_curriculum(app):
+    with app.app_context():
+        assert Course.query.filter_by(status="published").count() == 3
+        free = Course.query.filter_by(slug="pause-before-reaction").one()
+        assert free.is_free is True
+        assert len(free.skills) == 1
+        assert len(free.topics) == 1
+        assert len(free.active_units) == 3
+        assert any(item.is_preview for item in free.active_units)
+
+
+def test_public_course_catalog_filters_and_detail_render(client):
+    landing = client.get("/")
+    assert landing.status_code == 200
+    assert "دوره‌هایی برای قدم بعدی خانواده" in landing.get_data(as_text=True)
+    free_list = client.get("/courses?price=free")
+    assert free_list.status_code == 200
+    assert "آرامش پیش از واکنش" in free_list.get_data(as_text=True)
+    assert "گوش‌دادن فعال به نوجوان" not in free_list.get_data(as_text=True)
+    detail = client.get("/courses/pause-before-reaction")
+    assert detail.status_code == 200
+    assert "سرفصل دوره" in detail.get_data(as_text=True)
+
+
+def test_admin_manages_skill_style_situation_and_prerequisite_relations(client, app):
+    with app.app_context():
+        topic_id = ScenarioTopic.query.first().id
+        prerequisite_id = SkillModule.query.first().id
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/skills",
+        data={
+            "action": "save",
+            "title": "گفت‌وگوی ترمیمی",
+            "slug": "repair-conversation",
+            "code": "S21",
+            "description": "ترمیم رابطه پس از تعارض و بازگشت به گفت‌وگوی امن.",
+            "icon": "fa-comments",
+            "duration": "18",
+            "level": "intermediate",
+            "style_tags": ["authoritative", "authoritarian"],
+            "scenario_ids": [str(topic_id)],
+            "prerequisite_ids": [str(prerequisite_id)],
+            "is_published": "1",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        skill = SkillModule.query.filter_by(slug="repair-conversation").one()
+        assert skill.code == "S21"
+        assert skill.style_tags == ["authoritative", "authoritarian"]
+        assert skill.scenario_ids == [topic_id]
+        assert skill.prerequisite_ids == [prerequisite_id]
+
+
+def test_course_structure_contract_rejects_invalid_and_caps_depth():
+    valid, errors = parse_course_structure(
+        [{"title": "فصل", "units": [{"title": "درس", "type": "video", "duration": 500}]}]
+    )
+    assert errors == []
+    assert valid[0]["units"][0]["duration"] == 240
+    normalized, invalid_errors = parse_course_structure(
+        [{"title": "", "units": [{"title": "", "type": "event"}]}]
+    )
+    assert normalized[0]["units"][0]["type"] == "text"
+    assert len(invalid_errors) >= 3
+
+
+def test_admin_course_builder_publishes_multilayer_course_and_relations(client, app):
+    with app.app_context():
+        skill_id = SkillModule.query.first().id
+        topic_id = ScenarioTopic.query.first().id
+    login(client, mobile="09120000001", password="AdminPass123")
+    assert client.get("/admin/courses/new").status_code == 200
+    payload = course_builder_payload()
+    payload["skill_ids"] = [str(skill_id)]
+    payload["topic_ids"] = [str(topic_id)]
+    response = client.post("/admin/courses/new", data=payload)
+    assert response.status_code == 302
+    with app.app_context():
+        course = Course.query.filter_by(slug="new-parent-course").one()
+        assert course.status == "published"
+        assert course.version == 1
+        assert course.skills[0].id == skill_id
+        assert course.topics[0].id == topic_id
+        assert course.chapters[0].units[0].title == "درس آغازین"
+
+
+def test_quiz_unit_requires_published_form_and_creates_course_assignment(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        quiz = DynamicForm(
+            title="آزمون پایان فصل",
+            slug="chapter-quiz",
+            form_type="quiz",
+            status="published",
+            schema_json=json.dumps(professional_form_fields(), ensure_ascii=False),
+            created_by=admin.id,
+        )
+        db.session.add(quiz)
+        db.session.commit()
+        quiz_id = quiz.id
+    structure = [{"title": "فصل آزمون", "units": [{"title": "ارزیابی فصل", "type": "quiz", "duration": 5, "form_id": quiz_id}]}]
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/courses/new",
+        data=course_builder_payload(slug="quiz-course", structure=structure),
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        course = Course.query.filter_by(slug="quiz-course").one()
+        assignment = FormAssignment.query.filter_by(
+            form_id=quiz_id, target_type="course", target_ref=str(course.id)
+        ).one()
+        assert assignment.status == "active"
+
+
+def test_parent_free_enrollment_is_idempotent_and_paid_course_is_blocked(client, app):
+    login(client)
+    first = client.post("/dashboard/courses/pause-before-reaction/enroll")
+    second = client.post("/dashboard/courses/pause-before-reaction/enroll")
+    assert first.status_code == second.status_code == 302
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        assert CourseEnrollment.query.filter_by(user_id=parent.id).count() == 1
+    paid = client.post(
+        "/dashboard/courses/active-listening-course/enroll", follow_redirects=True
+    )
+    assert "اتصال پرداخت در استیج بعدی" in paid.get_data(as_text=True)
+    with app.app_context():
+        assert CourseEnrollment.query.count() == 1
+
+
+def test_course_progress_completes_units_and_keeps_completed_course_access(client, app):
+    login(client)
+    client.post("/dashboard/courses/pause-before-reaction/enroll")
+    with app.app_context():
+        course = Course.query.filter_by(slug="pause-before-reaction").one()
+        unit_ids = [item.id for item in course.active_units]
+    for unit_id in unit_ids:
+        response = client.post(
+            f"/dashboard/courses/pause-before-reaction/learn?unit_id={unit_id}",
+            data={"unit_id": unit_id, "notes": "تمرین در خانه انجام شد"},
+        )
+        assert response.status_code == 302
+    with app.app_context():
+        enrollment = CourseEnrollment.query.one()
+        assert enrollment.status == "completed"
+        assert enrollment.progress_percent == 100
+        assert CourseUnitProgress.query.filter_by(status="completed").count() == len(unit_ids)
+    assert client.get("/dashboard/courses/pause-before-reaction/learn").status_code == 200
+
+
+def test_course_and_quiz_access_are_isolated_between_parents(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        other = User(full_name="والد بدون ثبت‌نام", mobile="09120000003", role="parent")
+        other.set_password("OtherPass123")
+        form = DynamicForm(
+            title="آزمون دوره رایگان",
+            slug="free-course-quiz",
+            form_type="quiz",
+            status="published",
+            schema_json=json.dumps(professional_form_fields(), ensure_ascii=False),
+            created_by=admin.id,
+        )
+        course = Course.query.filter_by(slug="pause-before-reaction").one()
+        db.session.add_all([other, form])
+        db.session.flush()
+        assignment = FormAssignment(
+            form_id=form.id,
+            target_type="course",
+            target_ref=str(course.id),
+            title=form.title,
+            created_by=admin.id,
+        )
+        db.session.add(assignment)
+        db.session.commit()
+        assignment_id = assignment.id
+    login(client)
+    client.post("/dashboard/courses/pause-before-reaction/enroll")
+    assert client.get(f"/dashboard/forms/{assignment_id}").status_code == 200
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="OtherPass123")
+    assert client.get(f"/dashboard/forms/{assignment_id}").status_code == 404
+    assert client.get("/dashboard/courses/pause-before-reaction/learn").status_code == 302
+
+
+def test_personalized_course_recommendation_uses_incomplete_skill(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1393, gender="girl")
+        skill = SkillModule.query.filter_by(slug="emotion-regulation").one()
+        db.session.add(child)
+        db.session.flush()
+        db.session.add(
+            SkillProgress(
+                user_id=parent.id,
+                child_id=child.id,
+                module_id=skill.id,
+                percent=20,
+            )
+        )
+        db.session.commit()
+        recommendations = recommended_courses(parent.id, child)
+        assert recommendations[0]["course"].slug == "pause-before-reaction"
+        assert any("نیمه‌تمام" in reason for reason in recommendations[0]["reasons"])
+    login(client)
+    page = client.get("/dashboard/my-courses")
+    assert page.status_code == 200
+    assert "پیشنهاد برای مسیر شما" in page.get_data(as_text=True)
 

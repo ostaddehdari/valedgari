@@ -121,6 +121,33 @@ class SkillModule(db.Model):
     duration = db.Column(db.Integer, nullable=False, default=10)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     is_published = db.Column(db.Boolean, nullable=False, default=True)
+    code = db.Column(db.String(30), nullable=False, default="", index=True)
+    level = db.Column(db.String(30), nullable=False, default="foundation", index=True)
+    style_tags_json = db.Column(db.Text, nullable=False, default="[]")
+    scenario_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    prerequisite_ids_json = db.Column(db.Text, nullable=False, default="[]")
+
+    @property
+    def style_tags(self):
+        try:
+            value = json.loads(self.style_tags_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def scenario_ids(self):
+        try:
+            return [int(value) for value in json.loads(self.scenario_ids_json or "[]")]
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def prerequisite_ids(self):
+        try:
+            return [int(value) for value in json.loads(self.prerequisite_ids_json or "[]")]
+        except (TypeError, ValueError):
+            return []
 
 
 class SkillProgress(db.Model):
@@ -197,6 +224,171 @@ class MicroLesson(db.Model):
 
     domain = db.relationship("SkillDomain")
     module = db.relationship("SkillModule")
+
+
+class Course(db.Model):
+    __tablename__ = "courses"
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    subtitle = db.Column(db.String(240), nullable=False, default="")
+    description = db.Column(db.Text, nullable=False, default="")
+    instructor_name = db.Column(db.String(140), nullable=False, default="تیم علمی والدیار")
+    cover_url = db.Column(db.String(700), nullable=False, default="")
+    intro_video_url = db.Column(db.String(700), nullable=False, default="")
+    level = db.Column(db.String(30), nullable=False, default="foundation", index=True)
+    duration_minutes = db.Column(db.Integer, nullable=False, default=60)
+    price_toman = db.Column(db.Integer, nullable=False, default=0)
+    style_tags_json = db.Column(db.Text, nullable=False, default="[]")
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    is_featured = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    published_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    chapters = db.relationship(
+        "CourseChapter", backref="course", lazy=True, cascade="all, delete-orphan",
+        order_by="CourseChapter.sort_order",
+    )
+    skill_links = db.relationship(
+        "CourseSkillMembership", backref="course", lazy=True, cascade="all, delete-orphan"
+    )
+    topic_links = db.relationship(
+        "CourseTopicMembership", backref="course", lazy=True, cascade="all, delete-orphan"
+    )
+    enrollments = db.relationship(
+        "CourseEnrollment", backref="course", lazy=True, cascade="all, delete-orphan"
+    )
+
+    @property
+    def is_free(self):
+        return self.price_toman <= 0
+
+    @property
+    def style_tags(self):
+        try:
+            value = json.loads(self.style_tags_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def skills(self):
+        return [link.skill for link in self.skill_links]
+
+    @property
+    def topics(self):
+        return [link.topic for link in self.topic_links]
+
+    @property
+    def active_units(self):
+        return [
+            unit for chapter in self.chapters if chapter.status == "active"
+            for unit in chapter.units if unit.status == "active"
+        ]
+
+
+class CourseSkillMembership(db.Model):
+    __tablename__ = "course_skill_memberships"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    skill_id = db.Column(db.Integer, db.ForeignKey("skill_modules.id"), nullable=False, index=True)
+    is_primary = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    skill = db.relationship("SkillModule")
+    __table_args__ = (db.UniqueConstraint("course_id", "skill_id"),)
+
+
+class CourseTopicMembership(db.Model):
+    __tablename__ = "course_topic_memberships"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    topic_id = db.Column(db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True)
+    topic = db.relationship("ScenarioTopic")
+    __table_args__ = (db.UniqueConstraint("course_id", "topic_id"),)
+
+
+class CourseChapter(db.Model):
+    __tablename__ = "course_chapters"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    description = db.Column(db.String(700), nullable=False, default="")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    units = db.relationship(
+        "CourseUnit", backref="chapter", lazy=True, cascade="all, delete-orphan",
+        order_by="CourseUnit.sort_order",
+    )
+
+
+class CourseUnit(db.Model):
+    __tablename__ = "course_units"
+    id = db.Column(db.Integer, primary_key=True)
+    chapter_id = db.Column(db.Integer, db.ForeignKey("course_chapters.id"), nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    unit_type = db.Column(db.String(30), nullable=False, default="text", index=True)
+    body = db.Column(db.Text, nullable=False, default="")
+    source_url = db.Column(db.String(700), nullable=False, default="")
+    duration_minutes = db.Column(db.Integer, nullable=False, default=5)
+    is_preview = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=True, index=True)
+    form = db.relationship("DynamicForm")
+
+
+class CourseEnrollment(db.Model):
+    __tablename__ = "course_enrollments"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True, index=True)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    source = db.Column(db.String(30), nullable=False, default="free")
+    price_snapshot_toman = db.Column(db.Integer, nullable=False, default=0)
+    enrolled_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    user = db.relationship("User")
+    child = db.relationship("Child")
+    progresses = db.relationship(
+        "CourseUnitProgress", backref="enrollment", lazy=True, cascade="all, delete-orphan"
+    )
+
+    @property
+    def progress_percent(self):
+        unit_ids = {unit.id for unit in self.course.active_units}
+        if not unit_ids:
+            return 0
+        completed = {
+            item.unit_id for item in self.progresses
+            if item.status == "completed" and item.unit_id in unit_ids
+        }
+        return round(len(completed) / len(unit_ids) * 100)
+
+    __table_args__ = (db.UniqueConstraint("course_id", "user_id", "child_id"),)
+
+
+class CourseUnitProgress(db.Model):
+    __tablename__ = "course_unit_progress"
+    id = db.Column(db.Integer, primary_key=True)
+    enrollment_id = db.Column(
+        db.Integer, db.ForeignKey("course_enrollments.id"), nullable=False, index=True
+    )
+    unit_id = db.Column(db.Integer, db.ForeignKey("course_units.id"), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, default="started", index=True)
+    percent = db.Column(db.Integer, nullable=False, default=0)
+    notes = db.Column(db.String(700), nullable=False, default="")
+    started_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    unit = db.relationship("CourseUnit")
+    __table_args__ = (db.UniqueConstraint("enrollment_id", "unit_id"),)
 
 
 class WeeklyPlan(db.Model):

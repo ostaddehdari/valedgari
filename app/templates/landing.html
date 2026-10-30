@@ -88,6 +88,15 @@
   </div>
 </section>
 
+{% if courses %}
+<section class="section-space course-slider-section" id="courses">
+  <div class="container">
+    <div class="section-heading d-flex flex-wrap justify-content-between align-items-end gap-3"><div><span class="eyebrow">آموزش مهارت‌ها</span><h2>دوره‌هایی برای قدم بعدی خانواده</h2><p>هر دوره به مهارت، سبک والدگری و موقعیت‌های واقعی متصل است.</p></div><div class="course-slider-controls"><button type="button" data-course-prev aria-label="دوره قبلی"><i class="fa-solid fa-arrow-right"></i></button><button type="button" data-course-next aria-label="دوره بعدی"><i class="fa-solid fa-arrow-left"></i></button><a class="btn btn-outline-custom" href="{{ url_for('main.courses') }}">همه دوره‌ها</a></div></div>
+    <div class="landing-course-track" data-course-track>{% for course in courses %}<div class="landing-course-slide">{% include "_course_card.html" %}</div>{% endfor %}</div>
+  </div>
+</section>
+{% endif %}
+
 <section class="section-space scenario-section" id="situations">
   <div class="container">
     <div class="section-heading text-center text-white" data-animate="animate__fadeInUp"><span class="eyebrow light">آزمایشگاه تصمیم</span><h2>اول اینجا تمرین کن، بعد در خانه پاسخ بده</h2><p>نمونه نمایشی: نوجوان می‌گوید «گوشی‌ام را پس نمی‌دهم!»</p></div>

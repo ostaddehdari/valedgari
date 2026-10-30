@@ -3,6 +3,11 @@ import json
 
 from .models import (
     AssessmentInstrument,
+    Course,
+    CourseChapter,
+    CourseSkillMembership,
+    CourseTopicMembership,
+    CourseUnit,
     MicroLesson,
     PersonalizationRule,
     ProfileDefinition,
@@ -71,6 +76,56 @@ MICRO_LESSONS = [
     ("small-motivation-step", "development-motivation", "motivation", "انگیزه با قدم کوچک", "والد نتیجه بزرگ را به یک اقدام کوچک و قابل شروع تبدیل کند.", "به‌جای پرسیدن «چرا انجام ندادی؟» مانع شروع را پیدا کنید و قدمی انتخاب کنید که در پانزده دقیقه انجام شود.", "یک کار عقب‌افتاده را به اولین قدم حداکثر پانزده‌دقیقه‌ای تبدیل کنید.", "پاداش بزرگ یا تهدید را جایگزین فهم مانع واقعی نکنید."),
     ("shared-problem", "problem-conflict", "problem-solving", "مسئله مشترک، نه نبرد دو نفر", "والد و نوجوان بتوانند مسئله را بدون مقصرسازی تعریف کنند.", "دو نیاز را کنار هم بنویسید: نیاز والد و نیاز نوجوان. سپس یک راه‌حل آزمایشی کوتاه برای هر دو انتخاب کنید.", "یک تعارض را با جمله «چطور می‌توانیم هم... و هم...» بازنویسی کنید.", "راه‌حل از پیش تعیین‌شده را با ظاهر سؤال به فرزند تحمیل نکنید."),
     ("safety-first", "risk-referral", "emotion-regulation", "وقتی آموزش باید متوقف شود", "والد بداند در خطر فوری، ایمنی بر گفت‌وگو و آموزش مقدم است.", "اگر احتمال آسیب به خود یا دیگری وجود دارد، بحث را متوقف، فاصله امن ایجاد و از حمایت حضوری تخصصی یا امدادی استفاده کنید.", "شماره‌ها و دو فرد امن خانواده را برای موقعیت ضروری از قبل مشخص کنید.", "در بحران وارد بحث اثبات حقانیت، تنبیه یا مهار فیزیکی بدون آموزش نشوید."),
+]
+
+
+COURSE_SEEDS = [
+    {
+        "slug": "pause-before-reaction",
+        "title": "آرامش پیش از واکنش",
+        "subtitle": "یک مسیر کوتاه برای تنظیم هیجان والد در لحظه‌های دشوار",
+        "description": "در این دوره یاد می‌گیرید پیش از پاسخ تکانه‌ای مکث کنید، هیجان خود را نام‌گذاری کنید و گفت‌وگو را در زمان امن ادامه دهید.",
+        "level": "foundation",
+        "price": 0,
+        "skills": ["emotion-regulation"],
+        "topics": ["anger"],
+        "styles": ["general", "authoritarian"],
+        "featured": True,
+        "chapters": [
+            ("شناخت لحظه تنش", [("چرخه محرک تا واکنش", "text", "محرک، برداشت، هیجان و پاسخ را از هم جدا کنید. هدف این نیست که خشم حذف شود؛ هدف ساختن فاصله‌ای کوتاه برای انتخاب پاسخ است."), ("تمرین مکث سه‌مرحله‌ای", "text", "توقف، یک بازدم آرام و نام‌گذاری هیجان؛ سپس فقط یک جمله کوتاه و محترمانه بگویید.")]),
+            ("انتقال به خانه", [("برنامه یک موقعیت واقعی", "text", "یک موقعیت پرتکرار را انتخاب کنید و جمله جایگزین خود را پیش از رخ‌دادن آن بنویسید.")]),
+        ],
+    },
+    {
+        "slug": "active-listening-course",
+        "title": "گوش‌دادن فعال به نوجوان",
+        "subtitle": "شنیدن احساس و نیاز، پیش از ارائه راه‌حل",
+        "description": "دوره‌ای کاربردی برای بازتاب احساس، سؤال باز و جلوگیری از نصیحت زودهنگام در گفت‌وگوهای روزمره.",
+        "level": "foundation",
+        "price": 390000,
+        "skills": ["active-listening", "empathy"],
+        "topics": ["school-drop", "friends"],
+        "styles": ["authoritative", "general"],
+        "featured": True,
+        "chapters": [
+            ("شنیدن بدون قضاوت", [("سه مانع شنیدن", "text", "بازجویی، راه‌حل فوری و مقایسه سه مانع رایج شنیدن هستند."), ("بازتاب دقیق", "text", "یک احساس یا نیاز را به صورت حدس محترمانه بازتاب دهید و فرصت اصلاح بدهید.")]),
+        ],
+    },
+    {
+        "slug": "respectful-boundaries",
+        "title": "مرزبندی محترمانه در خانه",
+        "subtitle": "قانون روشن، انتخاب محدود و پیامد مرتبط",
+        "description": "برای خانواده‌هایی که می‌خواهند بدون تهدید و جنگ قدرت، مرزهای قابل پیش‌بینی و قابل پیگیری بسازند.",
+        "level": "intermediate",
+        "price": 490000,
+        "skills": ["boundaries", "problem-solving"],
+        "topics": ["screen-time", "lying"],
+        "styles": ["authoritative", "permissive"],
+        "featured": True,
+        "chapters": [
+            ("ساخت قانون قابل اجرا", [("قانون کوتاه و روشن", "text", "قانون را درباره رفتار قابل مشاهده و در کمتر از پانزده کلمه بنویسید."), ("پیامد مرتبط", "text", "پیامد باید از قبل قابل پیش‌بینی، مرتبط با رفتار و بدون تحقیر باشد.")]),
+        ],
+    },
 ]
 
 
@@ -232,6 +287,68 @@ def seed_content():
                     sort_order=order,
                 )
             )
+        db.session.flush()
+
+    if Course.query.count() == 0:
+        modules = {item.slug: item for item in SkillModule.query.all()}
+        topics = {item.slug: item for item in ScenarioTopic.query.all()}
+        for course_order, item in enumerate(COURSE_SEEDS, 1):
+            course = Course(
+                slug=item["slug"],
+                title=item["title"],
+                subtitle=item["subtitle"],
+                description=item["description"],
+                instructor_name="تیم علمی والدیار",
+                level=item["level"],
+                duration_minutes=sum(
+                    7 for _chapter_title, units in item["chapters"] for _unit in units
+                ),
+                price_toman=item["price"],
+                style_tags_json=json.dumps(item["styles"], ensure_ascii=False),
+                status="published",
+                version=1,
+                is_featured=item["featured"],
+                sort_order=course_order,
+            )
+            db.session.add(course)
+            db.session.flush()
+            for skill_order, skill_slug in enumerate(item["skills"]):
+                skill = modules.get(skill_slug)
+                if skill:
+                    db.session.add(
+                        CourseSkillMembership(
+                            course_id=course.id,
+                            skill_id=skill.id,
+                            is_primary=skill_order == 0,
+                            sort_order=skill_order,
+                        )
+                    )
+            for topic_slug in item["topics"]:
+                topic = topics.get(topic_slug)
+                if topic:
+                    db.session.add(
+                        CourseTopicMembership(course_id=course.id, topic_id=topic.id)
+                    )
+            for chapter_order, (chapter_title, units) in enumerate(item["chapters"], 1):
+                chapter = CourseChapter(
+                    course_id=course.id,
+                    title=chapter_title,
+                    sort_order=chapter_order,
+                )
+                db.session.add(chapter)
+                db.session.flush()
+                for unit_order, (unit_title, unit_type, body) in enumerate(units, 1):
+                    db.session.add(
+                        CourseUnit(
+                            chapter_id=chapter.id,
+                            title=unit_title,
+                            unit_type=unit_type,
+                            body=body,
+                            duration_minutes=7,
+                            is_preview=course_order == 1 and chapter_order == 1 and unit_order == 1,
+                            sort_order=unit_order,
+                        )
+                    )
         db.session.flush()
 
     if PersonalizationRule.query.count() == 0 and ScenarioTopic.query.count():

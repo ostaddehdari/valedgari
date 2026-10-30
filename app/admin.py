@@ -20,6 +20,13 @@ from .models import (
     ChildProfileSnapshot,
     ContractBeneficiary,
     ConsentRecord,
+    Course,
+    CourseChapter,
+    CourseEnrollment,
+    CourseSkillMembership,
+    CourseTopicMembership,
+    CourseUnit,
+    CourseUnitProgress,
     DataDeletionRequest,
     DailyAction,
     DecisionNode,
@@ -89,6 +96,15 @@ from .form_engine import (
     score_answers,
     storage_filename,
     validate_ai_contract,
+)
+from .course_engine import (
+    COURSE_LEVELS,
+    COURSE_STATUSES,
+    STYLE_TAGS,
+    UNIT_TYPES,
+    parse_course_structure,
+    structure_payload,
+    sync_course_structure,
 )
 
 
@@ -855,6 +871,309 @@ def learning_path():
         lessons=lessons,
         edit_lesson=edit_lesson,
         stats=stats,
+    )
+
+
+@bp.route("/skills", methods=["GET", "POST"])
+@login_required
+@admin_required
+def skill_catalog():
+    if request.method == "POST":
+        action = request.form.get("action", "save")
+        skill_id = request.form.get("skill_id", type=int)
+        skill = db.session.get(SkillModule, skill_id) if skill_id else None
+        if action == "toggle" and skill:
+            skill.is_published = not skill.is_published
+            db.session.commit()
+            flash("وضعیت انتشار مهارت تغییر کرد.", "info")
+            return redirect(url_for("admin.skill_catalog"))
+        if action != "save":
+            abort(400)
+        title = request.form.get("title", "").strip()[:120]
+        slug = make_slug(request.form.get("slug", ""))[:80]
+        code = request.form.get("code", "").strip().upper()[:30]
+        level = request.form.get("level", "foundation")
+        if level not in COURSE_LEVELS:
+            level = "foundation"
+        duplicate = SkillModule.query.filter(
+            SkillModule.slug == slug,
+            SkillModule.id != (skill.id if skill else -1),
+        ).first()
+        errors = []
+        if len(title) < 3:
+            errors.append("عنوان مهارت باید حداقل سه نویسه باشد.")
+        if duplicate:
+            errors.append("نامک مهارت تکراری است.")
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+        else:
+            if not skill:
+                skill = SkillModule(slug=slug, title=title, description="")
+                db.session.add(skill)
+            skill.title = title
+            skill.slug = slug
+            skill.code = code
+            skill.description = request.form.get("description", "").strip()[:500]
+            skill.icon = request.form.get("icon", "fa-seedling").strip()[:60] or "fa-seedling"
+            skill.duration = max(1, min(240, request.form.get("duration", 10, type=int)))
+            skill.level = level
+            skill.sort_order = max(0, request.form.get("sort_order", 0, type=int))
+            skill.is_published = request.form.get("is_published") == "1"
+            skill.style_tags_json = json.dumps(
+                [item for item in request.form.getlist("style_tags") if item in STYLE_TAGS],
+                ensure_ascii=False,
+            )
+            skill.scenario_ids_json = json.dumps(
+                [item for item in request.form.getlist("scenario_ids", type=int) if db.session.get(ScenarioTopic, item)],
+                ensure_ascii=False,
+            )
+            skill.prerequisite_ids_json = json.dumps(
+                [item for item in request.form.getlist("prerequisite_ids", type=int) if db.session.get(SkillModule, item) and item != skill.id],
+                ensure_ascii=False,
+            )
+            db.session.commit()
+            flash("مهارت و ارتباط‌های آموزشی آن ذخیره شد.", "success")
+            return redirect(url_for("admin.skill_catalog"))
+    edit_id = request.args.get("edit", type=int)
+    return render_template(
+        "admin/skills.html",
+        skills=SkillModule.query.order_by(SkillModule.sort_order, SkillModule.id).all(),
+        topics=ScenarioTopic.query.order_by(ScenarioTopic.title).all(),
+        selected=db.session.get(SkillModule, edit_id) if edit_id else None,
+        levels=COURSE_LEVELS,
+        style_tags=STYLE_TAGS,
+    )
+
+
+def sync_course_links(course, skill_ids, topic_ids):
+    CourseSkillMembership.query.filter_by(course_id=course.id).delete(
+        synchronize_session=False
+    )
+    CourseTopicMembership.query.filter_by(course_id=course.id).delete(
+        synchronize_session=False
+    )
+    for index, skill_id in enumerate(skill_ids):
+        if db.session.get(SkillModule, skill_id):
+            db.session.add(
+                CourseSkillMembership(
+                    course_id=course.id,
+                    skill_id=skill_id,
+                    is_primary=index == 0,
+                    sort_order=index,
+                )
+            )
+    for topic_id in topic_ids:
+        if db.session.get(ScenarioTopic, topic_id):
+            db.session.add(CourseTopicMembership(course_id=course.id, topic_id=topic_id))
+
+
+def sync_course_quiz_assignments(course):
+    active_form_ids = {
+        unit.form_id
+        for unit in CourseUnit.query.join(CourseChapter).filter(
+            CourseChapter.course_id == course.id,
+            CourseChapter.status == "active",
+            CourseUnit.status == "active",
+            CourseUnit.unit_type == "quiz",
+            CourseUnit.form_id.isnot(None),
+        ).all()
+    }
+    assignments = FormAssignment.query.filter_by(
+        target_type="course", target_ref=str(course.id)
+    ).all()
+    existing = {item.form_id: item for item in assignments}
+    for form_id in active_form_ids:
+        assignment = existing.get(form_id)
+        form = db.session.get(DynamicForm, form_id)
+        if not assignment and form:
+            assignment = FormAssignment(
+                form_id=form_id,
+                target_type="course",
+                target_ref=str(course.id),
+                title=f"آزمون دوره: {form.title}",
+                created_by=current_user.id,
+            )
+            db.session.add(assignment)
+        elif assignment:
+            assignment.status = "active"
+    for form_id, assignment in existing.items():
+        if form_id not in active_form_ids:
+            assignment.status = "archived"
+
+
+@bp.route("/courses", methods=["GET", "POST"])
+@login_required
+@admin_required
+def courses():
+    if request.method == "POST":
+        course = db.get_or_404(Course, request.form.get("course_id", type=int))
+        action = request.form.get("action")
+        if action == "archive":
+            course.status = "archived"
+            course.archived_at = utcnow()
+            db.session.commit()
+            flash("دوره بایگانی شد؛ ثبت‌نام‌ها و پیشرفت‌های قبلی محفوظ ماند.", "info")
+        elif action == "duplicate":
+            base_slug = f"{course.slug}-copy"[:120]
+            clone_slug = base_slug
+            counter = 2
+            while Course.query.filter_by(slug=clone_slug).first():
+                suffix = f"-{counter}"
+                clone_slug = f"{base_slug[:120-len(suffix)]}{suffix}"
+                counter += 1
+            clone = Course(
+                slug=clone_slug,
+                title=f"کپی {course.title}",
+                subtitle=course.subtitle,
+                description=course.description,
+                instructor_name=course.instructor_name,
+                cover_url=course.cover_url,
+                intro_video_url=course.intro_video_url,
+                level=course.level,
+                duration_minutes=course.duration_minutes,
+                price_toman=course.price_toman,
+                style_tags_json=course.style_tags_json,
+                status="draft",
+                version=1,
+                created_by=current_user.id,
+            )
+            db.session.add(clone)
+            db.session.flush()
+            sync_course_links(clone, [item.id for item in course.skills], [item.id for item in course.topics])
+            copied_structure = structure_payload(course)
+            for chapter in copied_structure:
+                chapter["id"] = None
+                for unit in chapter["units"]:
+                    unit["id"] = None
+            sync_course_structure(clone, copied_structure)
+            db.session.commit()
+            flash("یک کپی Draft از دوره ساخته شد.", "success")
+            return redirect(url_for("admin.course_editor", course_id=clone.id))
+        else:
+            abort(400)
+        return redirect(url_for("admin.courses"))
+    query = Course.query
+    status = request.args.get("status", "")
+    search = request.args.get("q", "").strip()
+    if status in COURSE_STATUSES:
+        query = query.filter_by(status=status)
+    if search:
+        query = query.filter(or_(Course.title.contains(search), Course.slug.contains(search)))
+    rows = query.order_by(Course.updated_at.desc()).all()
+    stats = {
+        "all": Course.query.count(),
+        "published": Course.query.filter_by(status="published").count(),
+        "free": Course.query.filter(Course.price_toman <= 0, Course.status == "published").count(),
+        "enrollments": CourseEnrollment.query.count(),
+    }
+    return render_template("admin/courses.html", courses=rows, stats=stats, selected_status=status, search=search)
+
+
+@bp.route("/courses/new", methods=["GET", "POST"])
+@bp.route("/courses/<int:course_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def course_editor(course_id=None):
+    course = db.get_or_404(Course, course_id) if course_id else None
+    if request.method == "POST":
+        action = request.form.get("action", "save_draft")
+        if action not in {"save_draft", "publish"}:
+            abort(400)
+        title = request.form.get("title", "").strip()[:180]
+        slug = make_slug(request.form.get("slug", ""))[:120]
+        structure, errors = parse_course_structure(request.form.get("structure_json", "[]"))
+        duplicate = Course.query.filter(
+            Course.slug == slug, Course.id != (course.id if course else -1)
+        ).first()
+        if len(title) < 3:
+            errors.append("عنوان دوره باید حداقل سه نویسه باشد.")
+        if duplicate:
+            errors.append("نامک دوره تکراری است.")
+        price = max(0, request.form.get("price_toman", 0, type=int))
+        level = request.form.get("level", "foundation")
+        if level not in COURSE_LEVELS:
+            errors.append("سطح دوره معتبر نیست.")
+            level = "foundation"
+        if action == "publish":
+            if not structure or not any(item["units"] for item in structure):
+                errors.append("برای انتشار، دوره باید دست‌کم یک فصل و یک درس داشته باشد.")
+            for chapter in structure:
+                for unit in chapter["units"]:
+                    if unit["type"] == "quiz":
+                        form = db.session.get(DynamicForm, unit["form_id"])
+                        if not form or form.status != "published":
+                            errors.append(f"آزمون درس «{unit['title']}» باید یک فرم منتشرشده باشد.")
+        if errors:
+            for error in dict.fromkeys(errors):
+                flash(error, "danger")
+        else:
+            if not course:
+                course = Course(slug=slug, title=title, created_by=current_user.id)
+                db.session.add(course)
+                db.session.flush()
+            elif course.status == "published":
+                course.version += 1
+                if action == "save_draft":
+                    course.published_at = None
+            course.slug = slug
+            course.title = title
+            course.subtitle = request.form.get("subtitle", "").strip()[:240]
+            course.description = request.form.get("description", "").strip()[:10000]
+            course.instructor_name = request.form.get("instructor_name", "").strip()[:140] or "تیم علمی والدیار"
+            course.cover_url = request.form.get("cover_url", "").strip()[:700]
+            course.intro_video_url = request.form.get("intro_video_url", "").strip()[:700]
+            course.level = level
+            course.duration_minutes = max(1, min(100000, request.form.get("duration_minutes", 60, type=int)))
+            course.price_toman = price
+            course.style_tags_json = json.dumps(
+                [item for item in request.form.getlist("style_tags") if item in STYLE_TAGS], ensure_ascii=False
+            )
+            course.is_featured = request.form.get("is_featured") == "1"
+            course.sort_order = max(0, request.form.get("sort_order", 0, type=int))
+            course.status = "published" if action == "publish" else "draft"
+            course.published_at = utcnow() if action == "publish" else None
+            course.archived_at = None
+            sync_course_links(
+                course,
+                request.form.getlist("skill_ids", type=int),
+                request.form.getlist("topic_ids", type=int),
+            )
+            sync_course_structure(course, structure)
+            db.session.flush()
+            sync_course_quiz_assignments(course)
+            db.session.commit()
+            flash(
+                f"دوره نسخه {course.version} {'منتشر' if action == 'publish' else 'ذخیره'} شد.",
+                "success",
+            )
+            return redirect(url_for("admin.course_editor", course_id=course.id))
+    return render_template(
+        "admin/course_builder.html",
+        selected=course,
+        structure=structure_payload(course) if course else [],
+        skills=SkillModule.query.order_by(SkillModule.sort_order).all(),
+        topics=ScenarioTopic.query.order_by(ScenarioTopic.title).all(),
+        forms=DynamicForm.query.filter(
+            DynamicForm.status == "published",
+            DynamicForm.form_type.in_(["assessment", "quiz"]),
+        ).order_by(DynamicForm.title).all(),
+        levels=COURSE_LEVELS,
+        style_tags=STYLE_TAGS,
+        unit_types=UNIT_TYPES,
+    )
+
+
+@bp.get("/courses/<int:course_id>/students")
+@login_required
+@admin_required
+def course_students(course_id):
+    course = db.get_or_404(Course, course_id)
+    enrollments = CourseEnrollment.query.filter_by(course_id=course.id).order_by(
+        CourseEnrollment.enrolled_at.desc()
+    ).all()
+    return render_template(
+        "admin/course_students.html", course=course, enrollments=enrollments
     )
 
 
@@ -2389,6 +2708,11 @@ def form_assignment(form_id):
         flash("فرزند هدف پیدا نشد.", "danger")
     elif target_type in {"course", "journey"} and not target_ref:
         flash("شناسه دوره یا مرحله مسیر را وارد کنید.", "danger")
+    elif target_type == "course" and (
+        not target_ref.isdigit()
+        or not Course.query.filter_by(id=int(target_ref), status="published").first()
+    ):
+        flash("دوره منتشرشده معتبر پیدا نشد.", "danger")
     else:
         assignment = FormAssignment(
             form_id=form.id,

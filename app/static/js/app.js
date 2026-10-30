@@ -465,6 +465,98 @@
     renderPage();
   }
 
+  const courseBuilder = document.getElementById("courseBuilder");
+  if (courseBuilder) {
+    const outline = document.getElementById("courseOutline");
+    const hiddenStructure = document.getElementById("courseStructureJson");
+    const quizForms = JSON.parse(document.getElementById("courseQuizForms").textContent || "[]");
+    const unitLabels = JSON.parse(courseBuilder.dataset.unitTypes || "{}");
+    let chapters = [];
+    let selectedChapter = 0;
+    try { chapters = JSON.parse(hiddenStructure.value || "[]"); } catch (_) { chapters = []; }
+
+    function unitIcon(type) {
+      return ({ text: "fa-align-right", video: "fa-video", audio: "fa-headphones", file: "fa-file-arrow-down", link: "fa-link", quiz: "fa-square-poll-vertical" })[type] || "fa-file";
+    }
+    function syncCourseStructure() { hiddenStructure.value = JSON.stringify(chapters); }
+    function quizOptions(selected) {
+      return `<option value="">انتخاب فرم منتشرشده</option>${quizForms.map((form) => `<option value="${form.id}" ${Number(selected) === Number(form.id) ? "selected" : ""}>${escapeHtml(form.title)}</option>`).join("")}`;
+    }
+    function renderCourseOutline() {
+      if (!chapters.length) {
+        outline.innerHTML = '<div class="canvas-empty"><i class="fa-solid fa-layer-group"></i><strong>اولین فصل را بسازید</strong><span>از دکمه فصل جدید استفاده کنید.</span></div>';
+        syncCourseStructure();
+        return;
+      }
+      outline.innerHTML = chapters.map((chapter, chapterIndex) => `
+        <article class="course-chapter-card ${chapterIndex === selectedChapter ? "selected" : ""}" data-chapter="${chapterIndex}" draggable="true">
+          <div class="course-chapter-head"><button type="button" class="course-drag" aria-label="جابجایی فصل"><i class="fa-solid fa-grip-vertical"></i></button><input data-chapter-prop="title" value="${escapeAttr(chapter.title || "")}" placeholder="عنوان فصل"><div class="course-chapter-head-actions"><button type="button" data-duplicate-chapter title="کپی"><i class="fa-regular fa-copy"></i></button><button type="button" class="danger" data-remove-chapter title="حذف"><i class="fa-solid fa-trash"></i></button></div></div>
+          <input class="course-chapter-description" data-chapter-prop="description" value="${escapeAttr(chapter.description || "")}" placeholder="توضیح کوتاه فصل">
+          <div class="course-units">${(chapter.units || []).map((unit, unitIndex) => `
+            <div class="course-unit-item" data-unit="${unitIndex}" draggable="true"><div class="course-unit-row"><button type="button" class="course-drag"><i class="fa-solid fa-grip-vertical"></i></button><span class="course-unit-icon"><i class="fa-solid ${unitIcon(unit.type)}"></i></span><div class="course-unit-copy"><strong>${escapeHtml(unit.title || unitLabels[unit.type] || "درس جدید")}</strong><small>${escapeHtml(unitLabels[unit.type] || unit.type)} · ${Number(unit.duration || 5)} دقیقه${unit.is_preview ? " · پیش‌نمایش" : ""}</small></div><div class="course-unit-actions"><button type="button" data-edit-unit><i class="fa-solid fa-pen"></i></button><button type="button" data-duplicate-unit><i class="fa-regular fa-copy"></i></button><button type="button" class="danger" data-remove-unit><i class="fa-solid fa-trash"></i></button></div></div><div class="course-unit-editor"><label>عنوان<input class="form-control" data-unit-prop="title" value="${escapeAttr(unit.title || "")}"></label><label>مدت دقیقه<input class="form-control" type="number" min="1" max="240" data-unit-prop="duration" value="${Number(unit.duration || 5)}"></label><label class="full">متن یا توضیح<textarea class="form-control" rows="4" data-unit-prop="body">${escapeHtml(unit.body || "")}</textarea></label>${unit.type !== "text" && unit.type !== "quiz" ? `<label class="full">آدرس منبع<input class="form-control" dir="ltr" data-unit-prop="source_url" value="${escapeAttr(unit.source_url || "")}"></label>` : ""}${unit.type === "quiz" ? `<label class="full">فرم آزمون<select class="form-select" data-unit-prop="form_id">${quizOptions(unit.form_id)}</select></label>` : ""}<label class="full form-check"><input class="form-check-input" type="checkbox" data-unit-prop="is_preview" ${unit.is_preview ? "checked" : ""}><span>پیش‌نمایش رایگان</span></label></div></div>`).join("") || '<div class="inline-empty">هنوز درسی در این فصل نیست.</div>'}</div>
+        </article>`).join("");
+      syncCourseStructure();
+    }
+    function newUnit(type) { return { id: null, title: unitLabels[type] || "درس جدید", type, body: "", source_url: "", duration: 5, is_preview: false, form_id: null }; }
+    document.querySelector("[data-add-chapter]").addEventListener("click", () => { chapters.push({ id: null, title: `فصل ${chapters.length + 1}`, description: "", units: [] }); selectedChapter = chapters.length - 1; renderCourseOutline(); });
+    document.querySelectorAll("[data-add-unit]").forEach((button) => button.addEventListener("click", () => {
+      if (!chapters.length) chapters.push({ id: null, title: "فصل ۱", description: "", units: [] });
+      chapters[selectedChapter].units = chapters[selectedChapter].units || [];
+      chapters[selectedChapter].units.push(newUnit(button.dataset.addUnit));
+      renderCourseOutline();
+      const editors = outline.querySelectorAll(`[data-chapter="${selectedChapter}"] .course-unit-editor`);
+      if (editors.length) editors[editors.length - 1].classList.add("open");
+    }));
+    outline.addEventListener("click", (event) => {
+      const chapterElement = event.target.closest("[data-chapter]");
+      if (!chapterElement) return;
+      const chapterIndex = Number(chapterElement.dataset.chapter);
+      if (selectedChapter !== chapterIndex && !event.target.closest("button,input,textarea,select,label")) { selectedChapter = chapterIndex; renderCourseOutline(); return; }
+      selectedChapter = chapterIndex;
+      const unitElement = event.target.closest("[data-unit]");
+      const unitIndex = unitElement ? Number(unitElement.dataset.unit) : -1;
+      if (event.target.closest("[data-remove-chapter]")) { chapters.splice(chapterIndex, 1); selectedChapter = Math.max(0, chapterIndex - 1); renderCourseOutline(); }
+      else if (event.target.closest("[data-duplicate-chapter]")) { const copy = JSON.parse(JSON.stringify(chapters[chapterIndex])); copy.id = null; copy.title = `کپی ${copy.title}`; copy.units.forEach((unit) => { unit.id = null; }); chapters.splice(chapterIndex + 1, 0, copy); selectedChapter = chapterIndex + 1; renderCourseOutline(); }
+      else if (unitElement && event.target.closest("[data-edit-unit]")) unitElement.querySelector(".course-unit-editor").classList.toggle("open");
+      else if (unitElement && event.target.closest("[data-remove-unit]")) { chapters[chapterIndex].units.splice(unitIndex, 1); renderCourseOutline(); }
+      else if (unitElement && event.target.closest("[data-duplicate-unit]")) { const copy = JSON.parse(JSON.stringify(chapters[chapterIndex].units[unitIndex])); copy.id = null; copy.title = `کپی ${copy.title}`; chapters[chapterIndex].units.splice(unitIndex + 1, 0, copy); renderCourseOutline(); }
+      else if (!event.target.closest("input,textarea,select,button,label")) { selectedChapter = chapterIndex; renderCourseOutline(); }
+    });
+    outline.addEventListener("input", (event) => {
+      const chapterElement = event.target.closest("[data-chapter]");
+      if (!chapterElement) return;
+      const chapterIndex = Number(chapterElement.dataset.chapter);
+      if (event.target.dataset.chapterProp) chapters[chapterIndex][event.target.dataset.chapterProp] = event.target.value;
+      const unitElement = event.target.closest("[data-unit]");
+      if (unitElement && event.target.dataset.unitProp) {
+        const unit = chapters[chapterIndex].units[Number(unitElement.dataset.unit)];
+        const prop = event.target.dataset.unitProp;
+        unit[prop] = event.target.type === "checkbox" ? event.target.checked : (prop === "duration" || prop === "form_id" ? Number(event.target.value) || null : event.target.value);
+        unitElement.querySelector(".course-unit-copy strong").textContent = unit.title;
+      }
+      syncCourseStructure();
+    });
+    let dragChapter = null, dragUnit = null;
+    outline.addEventListener("dragstart", (event) => { const chapter = event.target.closest("[data-chapter]"); const unit = event.target.closest("[data-unit]"); if (unit) dragUnit = { chapter: Number(chapter.dataset.chapter), unit: Number(unit.dataset.unit) }; else if (chapter) dragChapter = Number(chapter.dataset.chapter); event.target.classList.add("dragging"); });
+    outline.addEventListener("dragend", (event) => { event.target.classList.remove("dragging"); dragChapter = null; dragUnit = null; });
+    outline.addEventListener("dragover", (event) => event.preventDefault());
+    outline.addEventListener("drop", (event) => { event.preventDefault(); const targetChapter = event.target.closest("[data-chapter]"); if (!targetChapter) return; const targetChapterIndex = Number(targetChapter.dataset.chapter); const targetUnit = event.target.closest("[data-unit]"); if (dragUnit) { const [moved] = chapters[dragUnit.chapter].units.splice(dragUnit.unit, 1); const targetIndex = targetUnit ? Number(targetUnit.dataset.unit) : chapters[targetChapterIndex].units.length; chapters[targetChapterIndex].units.splice(targetIndex, 0, moved); selectedChapter = targetChapterIndex; } else if (dragChapter !== null && dragChapter !== targetChapterIndex) { const [moved] = chapters.splice(dragChapter, 1); chapters.splice(targetChapterIndex, 0, moved); selectedChapter = targetChapterIndex; } renderCourseOutline(); });
+    courseBuilder.addEventListener("submit", syncCourseStructure);
+    renderCourseOutline();
+  }
+
+  const courseTrack = document.querySelector("[data-course-track]");
+  if (courseTrack) {
+    const move = (direction) => courseTrack.scrollBy({ left: direction * Math.min(370, courseTrack.clientWidth * .85), behavior: reduceMotion ? "auto" : "smooth" });
+    document.querySelector("[data-course-prev]")?.addEventListener("click", () => move(1));
+    document.querySelector("[data-course-next]")?.addEventListener("click", () => move(-1));
+    let active = false, startX = 0, startScroll = 0;
+    courseTrack.addEventListener("pointerdown", (event) => { active = true; startX = event.clientX; startScroll = courseTrack.scrollLeft; courseTrack.classList.add("dragging"); courseTrack.setPointerCapture(event.pointerId); });
+    courseTrack.addEventListener("pointermove", (event) => { if (active) courseTrack.scrollLeft = startScroll - (event.clientX - startX); });
+    courseTrack.addEventListener("pointerup", () => { active = false; courseTrack.classList.remove("dragging"); });
+    courseTrack.addEventListener("pointercancel", () => { active = false; courseTrack.classList.remove("dragging"); });
+  }
+
   function escapeHtml(value) {
     const element = document.createElement("div");
     element.textContent = value || "";

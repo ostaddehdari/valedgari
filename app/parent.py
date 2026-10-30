@@ -16,6 +16,10 @@ from .models import (
     ChildProfileSnapshot,
     GuardianRelationship,
     ConsentRecord,
+    Course,
+    CourseEnrollment,
+    CourseUnit,
+    CourseUnitProgress,
     DataDeletionRequest,
     DailyAction,
     FormAssignment,
@@ -52,6 +56,7 @@ from .form_engine import (
     storage_filename,
     validate_answers,
 )
+from .course_engine import enrollment_for, recommended_courses
 
 
 bp = Blueprint("parent", __name__, url_prefix="/dashboard")
@@ -690,6 +695,10 @@ def assignment_allowed(assignment):
         assignment.target_type == "role" and assignment.target_ref == "parent"
         or assignment.target_type == "user" and assignment.target_id == current_user.id
         or assignment.target_type == "child" and assignment.target_id in child_ids
+        or assignment.target_type == "course" and CourseEnrollment.query.filter_by(
+            course_id=int(assignment.target_ref) if str(assignment.target_ref).isdigit() else -1,
+            user_id=current_user.id,
+        ).filter(CourseEnrollment.status.in_(["active", "completed"])).first() is not None
     )
 
 
@@ -973,6 +982,144 @@ def skills():
         for item in SkillProgress.query.filter_by(user_id=current_user.id, child_id=child.id)
     }
     return render_template("parent/skills.html", child=child, modules=modules, progress_map=progress_map)
+
+
+@bp.get("/my-courses")
+@login_required
+def my_courses():
+    child = owned_child()
+    enrollments = CourseEnrollment.query.filter_by(user_id=current_user.id).order_by(
+        CourseEnrollment.enrolled_at.desc()
+    ).all()
+    recommendations = recommended_courses(current_user.id, child)[:6]
+    return render_template(
+        "parent/my_courses.html",
+        child=child,
+        enrollments=enrollments,
+        recommendations=recommendations,
+    )
+
+
+@bp.post("/courses/<slug>/enroll")
+@login_required
+def course_enroll(slug):
+    course = Course.query.filter_by(slug=slug, status="published").first_or_404()
+    child_id = request.form.get("child_id", type=int)
+    child = owned_child(child_id) if child_id else owned_child()
+    if course.price_toman > 0:
+        flash("این دوره پولی است؛ اتصال پرداخت در استیج بعدی فعال می‌شود.", "warning")
+        return redirect(url_for("main.course_detail", slug=course.slug))
+    existing = CourseEnrollment.query.filter_by(
+        course_id=course.id,
+        user_id=current_user.id,
+        child_id=child.id if child else None,
+    ).first()
+    if existing:
+        if existing.status != "active":
+            existing.status = "active"
+            existing.completed_at = None
+            db.session.commit()
+        flash("این دوره از قبل در فهرست دوره‌های شماست.", "info")
+    else:
+        enrollment = CourseEnrollment(
+            course_id=course.id,
+            user_id=current_user.id,
+            child_id=child.id if child else None,
+            status="active",
+            source="free",
+            price_snapshot_toman=0,
+        )
+        db.session.add(enrollment)
+        db.session.commit()
+        flash("ثبت‌نام رایگان انجام شد؛ مسیر یادگیری آماده است.", "success")
+    return redirect(url_for("parent.course_learn", slug=course.slug))
+
+
+@bp.route("/courses/<slug>/learn", methods=["GET", "POST"])
+@login_required
+def course_learn(slug):
+    course = Course.query.filter_by(slug=slug, status="published").first_or_404()
+    enrollment = CourseEnrollment.query.filter_by(
+        course_id=course.id, user_id=current_user.id
+    ).filter(CourseEnrollment.status.in_(["active", "completed"])).order_by(
+        CourseEnrollment.enrolled_at.desc()
+    ).first()
+    if not enrollment:
+        flash("ابتدا در این دوره ثبت‌نام کنید.", "warning")
+        return redirect(url_for("main.course_detail", slug=course.slug))
+    units = course.active_units
+    unit_id = request.values.get("unit_id", type=int)
+    selected_unit = next((item for item in units if item.id == unit_id), None)
+    progress_map = {item.unit_id: item for item in enrollment.progresses}
+    if not selected_unit:
+        selected_unit = next(
+            (item for item in units if progress_map.get(item.id) is None or progress_map[item.id].status != "completed"),
+            units[0] if units else None,
+        )
+    if request.method == "POST":
+        if not selected_unit:
+            abort(404)
+        if selected_unit.unit_type == "quiz":
+            assignment = FormAssignment.query.filter_by(
+                form_id=selected_unit.form_id,
+                target_type="course",
+                target_ref=str(course.id),
+                status="active",
+            ).first()
+            submitted = assignment and FormResponse.query.filter_by(
+                assignment_id=assignment.id,
+                user_id=current_user.id,
+                child_id=enrollment.child_id,
+                status="submitted",
+            ).first()
+            if not submitted:
+                flash("ابتدا آزمون این درس را ثبت نهایی کنید.", "warning")
+                return redirect(url_for("parent.course_learn", slug=course.slug, unit_id=selected_unit.id))
+        progress = CourseUnitProgress.query.filter_by(
+            enrollment_id=enrollment.id, unit_id=selected_unit.id
+        ).first()
+        if not progress:
+            progress = CourseUnitProgress(
+                enrollment_id=enrollment.id,
+                unit_id=selected_unit.id,
+            )
+            db.session.add(progress)
+        progress.status = "completed"
+        progress.percent = 100
+        progress.notes = request.form.get("notes", "").strip()[:700]
+        progress.completed_at = utcnow()
+        db.session.flush()
+        completed_ids = {
+            item.unit_id for item in CourseUnitProgress.query.filter_by(
+                enrollment_id=enrollment.id, status="completed"
+            ).all()
+        }
+        if {item.id for item in units} <= completed_ids:
+            enrollment.status = "completed"
+            enrollment.completed_at = utcnow()
+        db.session.commit()
+        flash("درس تکمیل شد و پیشرفت دوره به‌روزرسانی شد.", "success")
+        next_unit = next((item for item in units if item.id not in completed_ids), None)
+        return redirect(
+            url_for("parent.course_learn", slug=course.slug, unit_id=next_unit.id if next_unit else selected_unit.id)
+        )
+    quiz_assignment = None
+    if selected_unit and selected_unit.unit_type == "quiz":
+        quiz_assignment = FormAssignment.query.filter_by(
+            form_id=selected_unit.form_id,
+            target_type="course",
+            target_ref=str(course.id),
+            status="active",
+        ).first()
+    return render_template(
+        "parent/course_player.html",
+        course=course,
+        enrollment=enrollment,
+        units=units,
+        selected_unit=selected_unit,
+        progress_map=progress_map,
+        quiz_assignment=quiz_assignment,
+    )
 
 
 @bp.route("/scenario", methods=["GET", "POST"])
