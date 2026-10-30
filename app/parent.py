@@ -18,6 +18,8 @@ from .models import (
     ConsentRecord,
     Course,
     CourseEnrollment,
+    CourseInvoice,
+    CourseOrder,
     CourseUnit,
     CourseUnitProgress,
     DataDeletionRequest,
@@ -28,6 +30,7 @@ from .models import (
     HomeActionOutcome,
     PlanReview,
     PaymentAllocation,
+    PaymentTransaction,
     ParentingAssessment,
     ParentingStyleAssessment,
     ProjectAuditLog,
@@ -57,6 +60,18 @@ from .form_engine import (
     validate_answers,
 )
 from .course_engine import enrollment_for, recommended_courses
+from .commerce import (
+    CommerceError,
+    GatewayError,
+    cancel_order,
+    complete_order,
+    create_course_order,
+    eligible_supports,
+    initiate_payment,
+    queue_sms,
+    setting,
+    verify_payment,
+)
 
 
 bp = Blueprint("parent", __name__, url_prefix="/dashboard")
@@ -1007,32 +1022,166 @@ def course_enroll(slug):
     child_id = request.form.get("child_id", type=int)
     child = owned_child(child_id) if child_id else owned_child()
     if course.price_toman > 0:
-        flash("این دوره پولی است؛ اتصال پرداخت در استیج بعدی فعال می‌شود.", "warning")
-        return redirect(url_for("main.course_detail", slug=course.slug))
-    existing = CourseEnrollment.query.filter_by(
-        course_id=course.id,
-        user_id=current_user.id,
-        child_id=child.id if child else None,
-    ).first()
-    if existing:
-        if existing.status != "active":
-            existing.status = "active"
-            existing.completed_at = None
-            db.session.commit()
-        flash("این دوره از قبل در فهرست دوره‌های شماست.", "info")
-    else:
-        enrollment = CourseEnrollment(
-            course_id=course.id,
-            user_id=current_user.id,
-            child_id=child.id if child else None,
-            status="active",
-            source="free",
-            price_snapshot_toman=0,
-        )
-        db.session.add(enrollment)
+        return redirect(url_for("parent.course_checkout", slug=course.slug, child_id=child.id if child else None))
+    try:
+        order, existing = create_course_order(current_user, child, course)
+        if existing:
+            if existing.status not in {"active", "completed"}:
+                existing.status = "active"
+                existing.completed_at = None
+                db.session.commit()
+            flash("این دوره از قبل در فهرست دوره‌های شماست.", "info")
+            return redirect(url_for("parent.course_learn", slug=course.slug))
+        enrollment = complete_order(order)
         db.session.commit()
-        flash("ثبت‌نام رایگان انجام شد؛ مسیر یادگیری آماده است.", "success")
+    except CommerceError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("main.course_detail", slug=course.slug))
+    if enrollment:
+        flash("ثبت‌نام رایگان انجام شد؛ فاکتور صفر و مسیر یادگیری ثبت شدند.", "success")
+    else:
+        flash("این دوره از قبل در فهرست دوره‌های شماست.", "info")
     return redirect(url_for("parent.course_learn", slug=course.slug))
+
+
+@bp.route("/courses/<slug>/checkout", methods=["GET", "POST"])
+@login_required
+def course_checkout(slug):
+    course = Course.query.filter_by(slug=slug, status="published").first_or_404()
+    child_id = request.values.get("child_id", type=int)
+    child = owned_child(child_id) if child_id else owned_child()
+    existing = CourseEnrollment.query.filter_by(
+        course_id=course.id, user_id=current_user.id, child_id=child.id if child else None
+    ).filter(CourseEnrollment.status.in_(["active", "completed"])).first()
+    if existing:
+        flash("این دوره هم‌اکنون در دسترس شماست.", "info")
+        return redirect(url_for("parent.course_learn", slug=course.slug))
+    supports = eligible_supports(current_user.id, child, course)
+    if request.method == "POST":
+        project_id = request.form.get("project_id", type=int)
+        if request.form.get("support_choice") == "none":
+            project_id = -1
+        try:
+            order, enrollment = create_course_order(current_user, child, course, project_id=project_id)
+            if enrollment:
+                return redirect(url_for("parent.course_learn", slug=course.slug))
+            if order.payable_amount_toman == 0:
+                complete_order(order)
+                db.session.commit()
+                flash("ثبت‌نام با پوشش کامل سازمان انجام شد.", "success")
+                return redirect(url_for("parent.invoice_detail", invoice_id=order.invoice.id))
+            callback = setting("zarinpal.callback_url")
+            if not callback:
+                base = current_app.config.get("PUBLIC_BASE_URL", "").rstrip("/")
+                callback = f"{base}/dashboard/payments/zarinpal/callback" if base else url_for(
+                    "parent.zarinpal_callback", _external=True
+                )
+            _transaction, gateway_url = initiate_payment(order, callback)
+            db.session.commit()
+            return redirect(gateway_url)
+        except (CommerceError, GatewayError) as exc:
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            flash(str(exc), "danger")
+    return render_template(
+        "parent/checkout.html",
+        course=course,
+        child=child,
+        supports=supports,
+        payment_mode=setting("zarinpal.mode", current_app.config.get("PAYMENT_MODE", "disabled")),
+    )
+
+
+@bp.get("/payments/zarinpal/callback")
+def zarinpal_callback():
+    authority = request.args.get("Authority", "").strip()[:100]
+    status = request.args.get("Status", "").upper()
+    transaction = PaymentTransaction.query.filter_by(authority=authority, provider="zarinpal").first()
+    if not transaction:
+        return render_template("parent/payment_result.html", success=False, message="تراکنش شناخته‌شده‌ای پیدا نشد."), 404
+    display_order = transaction.order if current_user.is_authenticated and (
+        current_user.id == transaction.order.user_id or current_user.is_admin
+    ) else None
+    if status != "OK":
+        try:
+            transaction.status = "cancelled" if status == "NOK" else "failed"
+            transaction.error_message = "پرداخت در درگاه لغو یا ناموفق شد."
+            cancel_order(transaction.order, transaction.order.user_id, transaction.error_message)
+            queue_sms(
+                "payment_failed",
+                transaction.order.user.mobile,
+                {"order": transaction.order.order_no},
+                f"payment-failed:{transaction.id}",
+                message=f"پرداخت سفارش {transaction.order.order_no} کامل نشد.",
+            )
+            db.session.commit()
+        except CommerceError:
+            db.session.rollback()
+        return render_template(
+            "parent/payment_result.html",
+            success=False,
+            message="پرداخت کامل نشد و رزرو حمایت آزاد شد. می‌توانید دوباره تلاش کنید.",
+            order=display_order,
+        )
+    try:
+        verify_payment(transaction)
+        db.session.commit()
+    except GatewayError as exc:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return render_template("parent/payment_result.html", success=False, message=str(exc), order=display_order), 400
+    return render_template(
+        "parent/payment_result.html",
+        success=True,
+        message="پرداخت تأیید و دسترسی دوره فعال شد.",
+        order=display_order,
+        transaction=transaction,
+    )
+
+
+@bp.get("/finance")
+@login_required
+def finance_history():
+    orders = CourseOrder.query.filter_by(user_id=current_user.id).order_by(
+        CourseOrder.created_at.desc()
+    ).all()
+    totals = {
+        "paid": sum(item.payable_amount_toman for item in orders if item.status == "paid"),
+        "supported": sum(item.organization_amount_toman for item in orders if item.status in {"paid", "refunded"}),
+        "invoices": sum(item.invoice is not None for item in orders),
+        "refunds": sum(item.payable_amount_toman for item in orders if item.status == "refunded"),
+    }
+    return render_template("parent/finance.html", orders=orders, totals=totals)
+
+
+@bp.get("/invoices/<int:invoice_id>")
+@login_required
+def invoice_detail(invoice_id):
+    invoice = db.get_or_404(CourseInvoice, invoice_id)
+    if invoice.order.user_id != current_user.id and not current_user.is_admin:
+        abort(404)
+    return render_template("parent/invoice.html", invoice=invoice, order=invoice.order)
+
+
+@bp.post("/orders/<int:order_id>/cancel")
+@login_required
+def order_cancel(order_id):
+    order = db.get_or_404(CourseOrder, order_id)
+    if order.user_id != current_user.id:
+        abort(404)
+    try:
+        cancel_order(order, current_user.id)
+        db.session.commit()
+        flash("سفارش لغو و رزرو مالی آزاد شد.", "info")
+    except CommerceError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("parent.finance_history"))
 
 
 @bp.route("/courses/<slug>/learn", methods=["GET", "POST"])
@@ -1097,6 +1246,13 @@ def course_learn(slug):
         if {item.id for item in units} <= completed_ids:
             enrollment.status = "completed"
             enrollment.completed_at = utcnow()
+            queue_sms(
+                "course_completed",
+                current_user.mobile,
+                {"name": current_user.full_name, "course": course.title},
+                f"course-completed:{enrollment.id}",
+                message=f"دوره «{course.title}» با موفقیت تکمیل شد.",
+            )
         db.session.commit()
         flash("درس تکمیل شد و پیشرفت دوره به‌روزرسانی شد.", "success")
         next_unit = next((item for item in units if item.id not in completed_ids), None)

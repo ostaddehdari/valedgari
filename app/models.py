@@ -350,6 +350,7 @@ class CourseEnrollment(db.Model):
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("course_orders.id"), nullable=True, unique=True, index=True)
     status = db.Column(db.String(20), nullable=False, default="active", index=True)
     source = db.Column(db.String(30), nullable=False, default="free")
     price_snapshot_toman = db.Column(db.Integer, nullable=False, default=0)
@@ -357,6 +358,7 @@ class CourseEnrollment(db.Model):
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     user = db.relationship("User")
     child = db.relationship("Child")
+    order = db.relationship("CourseOrder", foreign_keys=[order_id])
     progresses = db.relationship(
         "CourseUnitProgress", backref="enrollment", lazy=True, cascade="all, delete-orphan"
     )
@@ -389,6 +391,183 @@ class CourseUnitProgress(db.Model):
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     unit = db.relationship("CourseUnit")
     __table_args__ = (db.UniqueConstraint("enrollment_id", "unit_id"),)
+
+
+class CourseOrder(db.Model):
+    __tablename__ = "course_orders"
+    id = db.Column(db.Integer, primary_key=True)
+    order_no = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True, index=True)
+    status = db.Column(db.String(30), nullable=False, default="draft", index=True)
+    currency = db.Column(db.String(10), nullable=False, default="IRT")
+    gross_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    discount_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    organization_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    payable_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    support_project_id = db.Column(
+        db.Integer, db.ForeignKey("sponsored_projects.id"), nullable=True, index=True
+    )
+    allocation_id = db.Column(
+        db.Integer, db.ForeignKey("payment_allocations.id"), nullable=True, unique=True, index=True
+    )
+    pricing_snapshot_json = db.Column(db.Text, nullable=False, default="{}")
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    refunded_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    user = db.relationship("User")
+    child = db.relationship("Child")
+    support_project = db.relationship("SponsoredProject")
+    allocation = db.relationship("PaymentAllocation")
+    items = db.relationship(
+        "CourseOrderItem", backref="order", lazy=True, cascade="all, delete-orphan"
+    )
+    transactions = db.relationship(
+        "PaymentTransaction",
+        backref="order",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="PaymentTransaction.created_at.desc()",
+    )
+    invoice = db.relationship(
+        "CourseInvoice", backref="order", uselist=False, cascade="all, delete-orphan"
+    )
+
+    @property
+    def pricing_snapshot(self):
+        try:
+            value = json.loads(self.pricing_snapshot_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+
+class CourseOrderItem(db.Model):
+    __tablename__ = "course_order_items"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("course_orders.id"), nullable=False, index=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    title_snapshot = db.Column(db.String(180), nullable=False)
+    unit_price_toman = db.Column(db.Integer, nullable=False, default=0)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    line_total_toman = db.Column(db.Integer, nullable=False, default=0)
+    course = db.relationship("Course")
+
+
+class CourseInvoice(db.Model):
+    __tablename__ = "course_invoices"
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_no = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("course_orders.id"), nullable=False, unique=True, index=True)
+    status = db.Column(db.String(20), nullable=False, default="issued", index=True)
+    gross_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    discount_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    organization_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    payable_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    issued_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    refunded_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class PaymentTransaction(db.Model):
+    __tablename__ = "payment_transactions"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("course_orders.id"), nullable=False, index=True)
+    provider = db.Column(db.String(30), nullable=False, default="zarinpal", index=True)
+    idempotency_key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    authority = db.Column(db.String(100), unique=True, nullable=True, index=True)
+    amount_toman = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="initiated", index=True)
+    provider_code = db.Column(db.String(40), nullable=False, default="")
+    reference_id = db.Column(db.String(100), nullable=False, default="", index=True)
+    card_pan = db.Column(db.String(40), nullable=False, default="")
+    request_json = db.Column(db.Text, nullable=False, default="{}")
+    response_json = db.Column(db.Text, nullable=False, default="{}")
+    error_message = db.Column(db.String(500), nullable=False, default="")
+    attempt_no = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    verified_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    @property
+    def response(self):
+        try:
+            value = json.loads(self.response_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+
+class IntegrationSetting(db.Model):
+    __tablename__ = "integration_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=False, default="")
+    encrypted_value = db.Column(db.Text, nullable=False, default="")
+    secret_hint = db.Column(db.String(20), nullable=False, default="")
+    is_secret = db.Column(db.Boolean, nullable=False, default=False)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class SmsOutbox(db.Model):
+    __tablename__ = "sms_outbox"
+    id = db.Column(db.Integer, primary_key=True)
+    unique_key = db.Column(db.String(160), unique=True, nullable=False, index=True)
+    event_type = db.Column(db.String(60), nullable=False, index=True)
+    recipient = db.Column(db.String(20), nullable=False, index=True)
+    pattern_code = db.Column(db.String(100), nullable=False, default="")
+    message = db.Column(db.String(1000), nullable=False, default="")
+    payload_json = db.Column(db.Text, nullable=False, default="{}")
+    status = db.Column(db.String(30), nullable=False, default="queued", index=True)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    provider_message_id = db.Column(db.String(100), nullable=False, default="")
+    last_error = db.Column(db.String(500), nullable=False, default="")
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    sent_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    @property
+    def payload(self):
+        try:
+            value = json.loads(self.payload_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+
+class CommerceAuditLog(db.Model):
+    __tablename__ = "commerce_audit_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("course_orders.id"), nullable=True, index=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default="success", index=True)
+    details_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    order = db.relationship("CourseOrder")
+
+    @property
+    def details(self):
+        try:
+            value = json.loads(self.details_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 
 
 class WeeklyPlan(db.Model):

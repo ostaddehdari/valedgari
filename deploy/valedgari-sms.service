@@ -1,0 +1,18 @@
+[Unit]
+Description=Process Valedgari IPPanel outbox
+After=network-online.target valedgari.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/valedgari
+EnvironmentFile=/etc/valedgari.env
+ExecStart=/var/www/valedgari/.venv/bin/flask --app wsgi:app process-sms --limit 50
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/valedgari/instance
+

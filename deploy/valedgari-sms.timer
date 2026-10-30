@@ -1,0 +1,12 @@
+[Unit]
+Description=Process Valedgari SMS retry queue every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=valedgari-sms.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

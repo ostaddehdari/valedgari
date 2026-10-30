@@ -14,6 +14,8 @@ from app.models import (
     Course,
     CourseChapter,
     CourseEnrollment,
+    CourseInvoice,
+    CourseOrder,
     CourseSkillMembership,
     CourseTopicMembership,
     CourseUnit,
@@ -35,6 +37,7 @@ from app.models import (
     ParentingAssessment,
     ParentingStyleAssessment,
     PaymentAllocation,
+    PaymentTransaction,
     ProjectAuditLog,
     ProjectMembership,
     ProfileDefinition,
@@ -49,10 +52,20 @@ from app.models import (
     SkillModule,
     SkillProgress,
     SponsoredProject,
+    SmsOutbox,
+    CommerceAuditLog,
+    IntegrationSetting,
     User,
     WeeklyPlan,
 )
 from app.course_engine import parse_course_structure, recommended_courses
+from app.commerce import (
+    open_secret,
+    process_sms,
+    queue_sms,
+    save_setting,
+    seal_secret,
+)
 from app.form_engine import (
     AI_CONTRACT,
     FIELD_TYPES,
@@ -1938,7 +1951,7 @@ def test_quiz_unit_requires_published_form_and_creates_course_assignment(client,
         assert assignment.status == "active"
 
 
-def test_parent_free_enrollment_is_idempotent_and_paid_course_is_blocked(client, app):
+def test_parent_free_enrollment_is_idempotent_and_paid_course_opens_checkout(client, app):
     login(client)
     first = client.post("/dashboard/courses/pause-before-reaction/enroll")
     second = client.post("/dashboard/courses/pause-before-reaction/enroll")
@@ -1949,7 +1962,7 @@ def test_parent_free_enrollment_is_idempotent_and_paid_course_is_blocked(client,
     paid = client.post(
         "/dashboard/courses/active-listening-course/enroll", follow_redirects=True
     )
-    assert "اتصال پرداخت در استیج بعدی" in paid.get_data(as_text=True)
+    assert "تکمیل ثبت‌نام دوره" in paid.get_data(as_text=True)
     with app.app_context():
         assert CourseEnrollment.query.count() == 1
 
@@ -2032,4 +2045,254 @@ def test_personalized_course_recommendation_uses_incomplete_skill(client, app):
     page = client.get("/dashboard/my-courses")
     assert page.status_code == 200
     assert "پیشنهاد برای مسیر شما" in page.get_data(as_text=True)
+
+
+def configure_fake_zarinpal(client):
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/integrations",
+        data={
+            "action": "save_zarinpal",
+            "mode": "sandbox",
+            "merchant_id": "test-merchant-id-1234567890",
+            "callback_url": "http://localhost/dashboard/payments/zarinpal/callback",
+        },
+    )
+    assert response.status_code == 302
+    client.post("/auth/logout")
+
+
+def test_stage_twelve_secret_storage_is_authenticated_and_not_plaintext(app):
+    with app.app_context():
+        plaintext = "merchant-secret-value-1234"
+        sealed = seal_secret(plaintext)
+        assert plaintext not in sealed
+        assert open_secret(sealed) == plaintext
+        tampered = sealed[:-2] + ("AA" if sealed[-2:] != "AA" else "BB")
+        try:
+            open_secret(tampered)
+            assert False, "tampered secret must fail"
+        except Exception:
+            pass
+
+
+def test_free_course_creates_zero_invoice_audit_and_sms_once(client, app):
+    login(client)
+    assert client.post("/dashboard/courses/pause-before-reaction/enroll").status_code == 302
+    assert client.post("/dashboard/courses/pause-before-reaction/enroll").status_code == 302
+    with app.app_context():
+        order = CourseOrder.query.one()
+        assert order.status == "paid"
+        assert order.gross_amount_toman == order.payable_amount_toman == 0
+        assert order.invoice.status == "free"
+        assert CourseEnrollment.query.filter_by(order_id=order.id).count() == 1
+        assert CommerceAuditLog.query.filter_by(order_id=order.id, action="order_paid").count() == 1
+        assert SmsOutbox.query.filter_by(unique_key=f"course-enrolled:{order.id}").count() == 1
+
+
+def test_paid_checkout_fake_zarinpal_verify_is_idempotent(client, app):
+    configure_fake_zarinpal(client)
+    login(client)
+    response = client.post(
+        "/dashboard/courses/active-listening-course/checkout",
+        data={"project_id": "-1"},
+    )
+    assert response.status_code == 302
+    assert "sandbox.zarinpal.com" in response.headers["Location"]
+    with app.app_context():
+        order = CourseOrder.query.one()
+        transaction = PaymentTransaction.query.one()
+        assert order.status == "awaiting_payment"
+        assert transaction.status == "redirected"
+        authority = transaction.authority
+    callback = client.get(
+        f"/dashboard/payments/zarinpal/callback?Status=OK&Authority={authority}"
+    )
+    assert callback.status_code == 200
+    assert "پرداخت تأیید" in callback.get_data(as_text=True)
+    duplicate = client.get(
+        f"/dashboard/payments/zarinpal/callback?Status=OK&Authority={authority}"
+    )
+    assert duplicate.status_code == 200
+    with app.app_context():
+        order = CourseOrder.query.one()
+        assert order.status == "paid"
+        assert order.invoice.status == "paid"
+        assert CourseEnrollment.query.filter_by(order_id=order.id).count() == 1
+        assert PaymentTransaction.query.filter_by(status="verified").count() == 1
+        assert SmsOutbox.query.filter_by(event_type="purchase_success").count() == 1
+
+
+def test_cancelled_gateway_callback_releases_order_and_no_enrollment(client, app):
+    configure_fake_zarinpal(client)
+    login(client)
+    client.post(
+        "/dashboard/courses/active-listening-course/checkout",
+        data={"project_id": "-1"},
+    )
+    with app.app_context():
+        authority = PaymentTransaction.query.one().authority
+    result = client.get(
+        f"/dashboard/payments/zarinpal/callback?Status=NOK&Authority={authority}"
+    )
+    assert result.status_code == 200
+    with app.app_context():
+        assert CourseOrder.query.one().status == "cancelled"
+        assert PaymentTransaction.query.one().status == "cancelled"
+        assert CourseEnrollment.query.count() == 0
+
+
+def make_course_support(app, percent=70):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        parent = User.query.filter_by(mobile="09120000002").one()
+        course = Course.query.filter_by(slug="active-listening-course").one()
+        organization = Organization(name=f"سازمان حمایت {percent}", status="active")
+        db.session.add(organization)
+        db.session.flush()
+        project = SponsoredProject(
+            organization_id=organization.id,
+            name=f"حمایت {percent} درصدی دوره",
+            code=f"COURSE-{percent}",
+            status="active",
+            pricing_model="percent",
+            organization_share_percent=percent,
+            total_budget_toman=10_000_000,
+            eligible_services_json=json.dumps([course.slug], ensure_ascii=False),
+            created_by=admin.id,
+        )
+        db.session.add(project)
+        db.session.flush()
+        membership = ProjectMembership(
+            project_id=project.id,
+            user_id=parent.id,
+            status="active",
+            joined_code=project.code,
+        )
+        db.session.add(membership)
+        db.session.commit()
+        return project.id, course.price_toman
+
+
+def test_organizational_support_splits_order_and_reserves_allocation(client, app):
+    project_id, price = make_course_support(app, 70)
+    configure_fake_zarinpal(client)
+    login(client)
+    response = client.post(
+        "/dashboard/courses/active-listening-course/checkout",
+        data={"project_id": str(project_id)},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        order = CourseOrder.query.one()
+        assert order.gross_amount_toman == price
+        assert order.organization_amount_toman == round(price * .70)
+        assert order.payable_amount_toman == price - round(price * .70)
+        assert order.allocation.status == "reserved"
+        assert order.allocation.organization_amount_toman == order.organization_amount_toman
+
+
+def test_full_organizational_support_enrolls_without_gateway(client, app):
+    project_id, price = make_course_support(app, 100)
+    login(client)
+    response = client.post(
+        "/dashboard/courses/active-listening-course/checkout",
+        data={"project_id": str(project_id)},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        order = CourseOrder.query.one()
+        assert order.organization_amount_toman == price
+        assert order.payable_amount_toman == 0
+        assert order.status == "paid"
+        assert PaymentTransaction.query.count() == 0
+        assert CourseEnrollment.query.one().source == "sponsored"
+
+
+def test_invoice_and_finance_are_private_to_order_owner(client, app):
+    login(client)
+    client.post("/dashboard/courses/pause-before-reaction/enroll")
+    with app.app_context():
+        invoice_id = CourseInvoice.query.one().id
+        other = User(full_name="والد غریبه", mobile="09120000003", role="parent")
+        other.set_password("OtherPass123")
+        db.session.add(other)
+        db.session.commit()
+    assert client.get(f"/dashboard/invoices/{invoice_id}").status_code == 200
+    assert client.get("/dashboard/finance").status_code == 200
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="OtherPass123")
+    assert client.get(f"/dashboard/invoices/{invoice_id}").status_code == 404
+
+
+def test_admin_integration_settings_mask_secrets_and_test_sms(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/integrations",
+        data={
+            "action": "save_ippanel",
+            "enabled": "1",
+            "from_number": "+983000505",
+            "api_token": "ippanel-super-secret-token",
+            "pattern_course_reminder": "reminder-pattern",
+        },
+    )
+    assert response.status_code == 302
+    page = client.get("/admin/integrations")
+    text = page.get_data(as_text=True)
+    assert "ippanel-super-secret-token" not in text
+    assert "oken" in text
+    sent = client.post(
+        "/admin/integrations",
+        data={"action": "test_ippanel", "test_mobile": "09120000002"},
+    )
+    assert sent.status_code == 302
+    with app.app_context():
+        row = IntegrationSetting.query.filter_by(key="ippanel.api_token").one()
+        assert "ippanel-super-secret-token" not in row.encrypted_value
+        assert SmsOutbox.query.one().status == "sent"
+
+
+def test_sms_queue_is_idempotent_and_retry_safe(app):
+    with app.app_context():
+        save_setting("ippanel.enabled", "1")
+        save_setting("ippanel.from_number", "+983000505")
+        save_setting("ippanel.api_token", "secret-token", secret=True)
+        first = queue_sms(
+            "course_reminder", "09120000002", {"course": "آرامش"}, "same-event", "یادآوری دوره"
+        )
+        second = queue_sms(
+            "course_reminder", "09120000002", {"course": "آرامش"}, "same-event", "یادآوری دوره"
+        )
+        db.session.commit()
+        assert first.id == second.id
+        process_sms(first)
+        process_sms(first)
+        db.session.commit()
+        assert SmsOutbox.query.count() == 1
+        assert first.status == "sent"
+        assert first.attempts == 1
+
+
+def test_admin_sales_csv_and_refund_flow(client, app):
+    login(client)
+    client.post("/dashboard/courses/pause-before-reaction/enroll")
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    page = client.get("/admin/commerce")
+    assert page.status_code == 200
+    assert "فروش، پرداخت و تطبیق" in page.get_data(as_text=True)
+    exported = client.get("/admin/commerce/export.csv")
+    assert exported.status_code == 200
+    assert exported.data.startswith("\ufeff".encode())
+    with app.app_context():
+        order_id = CourseOrder.query.one().id
+    refunded = client.post(
+        "/admin/commerce",
+        data={"action": "refund", "order_id": str(order_id), "note": "درخواست والد"},
+    )
+    assert refunded.status_code == 302
+    with app.app_context():
+        assert CourseOrder.query.one().status == "refunded"
+        assert CourseInvoice.query.one().status == "refunded"
 

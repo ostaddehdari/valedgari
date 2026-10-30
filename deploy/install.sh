@@ -34,11 +34,13 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     echo "FLASK_ENV=production"
     echo "SECRET_KEY=${SECRET_VALUE}"
     echo "DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db"
-    echo "APP_VERSION=stage-6"
+    echo "APP_VERSION=stage-12"
     echo "REQUIRE_SCIENTIFIC_APPROVAL=1"
     echo "ANONYMOUS_REPORT_MIN_GROUP=5"
     echo "PAYMENT_PROVIDER=manual"
     echo "PAYMENT_MERCHANT_ID="
+    echo "PAYMENT_MODE=disabled"
+    echo "PUBLIC_BASE_URL=https://srun.ir/valedgari"
   } > "${ENV_FILE}"
 fi
 
@@ -50,6 +52,8 @@ install -m 644 "${APP_DIR}/deploy/valedgari-restore-test.service" "/etc/systemd/
 install -m 644 "${APP_DIR}/deploy/valedgari-restore-test.timer" "/etc/systemd/system/valedgari-restore-test.timer"
 install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.service" "/etc/systemd/system/valedgari-healthcheck.service"
 install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.timer" "/etc/systemd/system/valedgari-healthcheck.timer"
+install -m 644 "${APP_DIR}/deploy/valedgari-sms.service" "/etc/systemd/system/valedgari-sms.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-sms.timer" "/etc/systemd/system/valedgari-sms.timer"
 install -m 644 "${APP_DIR}/deploy/valedgari-logrotate" "/etc/logrotate.d/valedgari"
 chmod 750 "${APP_DIR}/deploy/backup-db.sh" "${APP_DIR}/deploy/restore-test.sh" "${APP_DIR}/deploy/healthcheck.sh"
 
@@ -87,7 +91,7 @@ fi
 nginx -t
 systemctl daemon-reload
 systemctl enable --now valedgari
-systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer valedgari-healthcheck.timer
+systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer valedgari-healthcheck.timer valedgari-sms.timer
 systemctl reload nginx
 
 for attempt in {1..15}; do

@@ -104,14 +104,16 @@ pytest -q
 FLASK_ENV=production
 SECRET_KEY=generated-secret
 DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db
-APP_VERSION=stage-6
+APP_VERSION=stage-12
 REQUIRE_SCIENTIFIC_APPROVAL=1
 ANONYMOUS_REPORT_MIN_GROUP=5
 PAYMENT_PROVIDER=manual
 PAYMENT_MERCHANT_ID=
+PAYMENT_MODE=disabled
+PUBLIC_BASE_URL=https://srun.ir/valedgari
 ```
 
-تا زمان دریافت قرارداد و کلید PSP، `PAYMENT_PROVIDER=manual` بماند. برای درگاه واقعی باید نام provider، شناسه پذیرنده، secret و callback مورد تأیید PSP اضافه شود؛ هیچ کلیدی در Git قرار نگیرد.
+تا زمان دریافت Credential، `PAYMENT_MODE=disabled` بماند. Merchant ID زرین‌پال و Token پیامک از صفحه «تنظیم سرویس‌ها» به‌صورت رمز‌شده ثبت می‌شوند و نباید در Git یا Log قرار گیرند. پس از دریافت کلید، ابتدا Sandbox و پیام آزمایشی IPPanel اجرا و سپس Production فعال شود.
 
 پس از تغییر env:
 

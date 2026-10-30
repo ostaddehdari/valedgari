@@ -18,12 +18,16 @@ class Config:
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
     SEND_FILE_MAX_AGE_DEFAULT = 31536000
-    APP_VERSION = os.getenv("APP_VERSION", "stage-6")
+    APP_VERSION = os.getenv("APP_VERSION", "stage-12")
     PRIVACY_POLICY_VERSION = os.getenv("PRIVACY_POLICY_VERSION", "1405-08-07-v1")
     ANONYMOUS_REPORT_MIN_GROUP = int(os.getenv("ANONYMOUS_REPORT_MIN_GROUP", "5"))
     REQUIRE_SCIENTIFIC_APPROVAL = os.getenv("REQUIRE_SCIENTIFIC_APPROVAL", "0") == "1"
     PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER", "manual")
     PAYMENT_MERCHANT_ID = os.getenv("PAYMENT_MERCHANT_ID", "")
+    PAYMENT_MODE = os.getenv("PAYMENT_MODE", "disabled")
+    PAYMENT_FAKE_GATEWAY = False
+    SMS_FAKE_PROVIDER = False
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 
 
 class ProductionConfig(Config):
@@ -37,4 +41,6 @@ class TestConfig(Config):
     WTF_CSRF_ENABLED = False
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SECRET_KEY = "test-secret"
+    PAYMENT_FAKE_GATEWAY = True
+    SMS_FAKE_PROVIDER = True
 

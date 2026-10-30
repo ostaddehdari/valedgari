@@ -88,6 +88,28 @@ def create_app(config_object=None):
         db.session.commit()
         click.echo("حساب مدیر ایجاد یا به‌روزرسانی شد.")
 
+    @app.cli.command("process-sms")
+    @click.option("--limit", default=50, type=click.IntRange(1, 500))
+    def process_sms_queue(limit):
+        """Process due IPPanel jobs; safe to run repeatedly from cron/systemd."""
+        from .commerce import SmsError, process_sms
+        from .models import SmsOutbox, utcnow
+
+        jobs = SmsOutbox.query.filter(
+            SmsOutbox.status.in_(["queued", "retry"]),
+            (SmsOutbox.next_attempt_at.is_(None)) | (SmsOutbox.next_attempt_at <= utcnow()),
+        ).order_by(SmsOutbox.created_at).limit(limit).all()
+        sent = failed = 0
+        for job in jobs:
+            try:
+                process_sms(job)
+                db.session.commit()
+                sent += 1
+            except SmsError:
+                db.session.commit()
+                failed += 1
+        click.echo(f"processed={len(jobs)} sent={sent} failed={failed}")
+
     @app.cli.command("create-reviewer")
     @click.option("--mobile", prompt="شماره موبایل ناظر علمی")
     @click.option("--name", prompt="نام ناظر علمی")

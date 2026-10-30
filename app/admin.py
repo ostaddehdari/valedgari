@@ -23,6 +23,9 @@ from .models import (
     Course,
     CourseChapter,
     CourseEnrollment,
+    CourseInvoice,
+    CourseOrder,
+    CourseOrderItem,
     CourseSkillMembership,
     CourseTopicMembership,
     CourseUnit,
@@ -40,6 +43,7 @@ from .models import (
     OrganizationAuditLog,
     OrganizationContract,
     PaymentAllocation,
+    PaymentTransaction,
     ParentingAssessment,
     ParentingStyleAssessment,
     PersonalizationRule,
@@ -55,6 +59,7 @@ from .models import (
     ScientificReview,
     SkillModule,
     SkillProgress,
+    SmsOutbox,
     SponsoredProject,
     User,
     HomeActionOutcome,
@@ -105,6 +110,22 @@ from .course_engine import (
     parse_course_structure,
     structure_payload,
     sync_course_structure,
+)
+from .commerce import (
+    PAYMENT_MODES,
+    SMS_EVENTS,
+    CommerceError,
+    GatewayError,
+    SmsError,
+    process_sms,
+    queue_sms,
+    reconciliation_issues,
+    refund_order,
+    save_setting,
+    secret_setting,
+    setting,
+    setting_hint,
+    test_zarinpal_connection,
 )
 
 
@@ -361,8 +382,8 @@ def operations():
     approved_reviews = ScientificReview.query.filter_by(status="approved").count()
     pending_reviews = ScientificReview.query.filter_by(status="pending").count()
     operations_state = {
-        "payment_provider": current_app.config["PAYMENT_PROVIDER"],
-        "payment_ready": bool(current_app.config["PAYMENT_MERCHANT_ID"]),
+        "payment_provider": f"zarinpal/{setting('zarinpal.mode', current_app.config.get('PAYMENT_MODE', 'disabled'))}",
+        "payment_ready": bool(secret_setting("zarinpal.merchant_id") or current_app.config["PAYMENT_MERCHANT_ID"]),
         "scientific_gate": current_app.config["REQUIRE_SCIENTIFIC_APPROVAL"],
         "policy_version": current_app.config["PRIVACY_POLICY_VERSION"],
         "consents": ConsentRecord.query.count(),
@@ -1174,6 +1195,190 @@ def course_students(course_id):
     ).all()
     return render_template(
         "admin/course_students.html", course=course, enrollments=enrollments
+    )
+
+
+@bp.route("/commerce", methods=["GET", "POST"])
+@login_required
+@admin_required
+def commerce_dashboard():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "refund":
+            order = db.get_or_404(CourseOrder, request.form.get("order_id", type=int))
+            try:
+                refund_order(order, current_user.id, request.form.get("note", "بازپرداخت ثبت‌شده توسط مدیر"))
+                db.session.commit()
+                flash("بازپرداخت در دفتر مالی ثبت و دسترسی دوره به‌روزرسانی شد.", "success")
+            except CommerceError as exc:
+                db.session.rollback()
+                flash(str(exc), "danger")
+        elif action == "retry_sms":
+            job = db.get_or_404(SmsOutbox, request.form.get("sms_id", type=int))
+            try:
+                job.status = "queued"
+                process_sms(job)
+                db.session.commit()
+                flash("پیامک با موفقیت ارسال شد.", "success")
+            except SmsError as exc:
+                db.session.commit()
+                flash(str(exc), "danger")
+        elif action == "course_reminder":
+            enrollment = db.get_or_404(CourseEnrollment, request.form.get("enrollment_id", type=int))
+            job = queue_sms(
+                "course_reminder",
+                enrollment.user.mobile,
+                {"name": enrollment.user.full_name, "course": enrollment.course.title, "progress": enrollment.progress_percent},
+                f"course-reminder:{enrollment.id}:{datetime.utcnow():%Y%m%d}",
+                message=f"یادآوری والدیار: ادامه دوره «{enrollment.course.title}» منتظر شماست.",
+            )
+            db.session.commit()
+            flash(f"یادآوری در صف پیامک شماره {job.id} قرار گرفت.", "info")
+        else:
+            abort(400)
+        return redirect(url_for("admin.commerce_dashboard"))
+
+    query = CourseOrder.query
+    selected_status = request.args.get("status", "")
+    search = request.args.get("q", "").strip()
+    if selected_status in {"draft", "awaiting_payment", "paid", "failed", "cancelled", "refunded"}:
+        query = query.filter_by(status=selected_status)
+    if search:
+        query = query.join(User, CourseOrder.user_id == User.id).filter(
+            or_(CourseOrder.order_no.contains(search), User.full_name.contains(search), User.mobile.contains(search))
+        )
+    orders = query.order_by(CourseOrder.created_at.desc()).all()
+    all_orders = CourseOrder.query.all()
+    stats = {
+        "orders": len(all_orders),
+        "paid": sum(item.status == "paid" for item in all_orders),
+        "revenue": sum(item.payable_amount_toman for item in all_orders if item.status == "paid"),
+        "organization": sum(item.organization_amount_toman for item in all_orders if item.status in {"paid", "refunded"}),
+        "failed": sum(item.status == "failed" for item in all_orders),
+    }
+    sms_jobs = SmsOutbox.query.order_by(SmsOutbox.created_at.desc()).limit(30).all()
+    return render_template(
+        "admin/commerce.html",
+        orders=orders,
+        stats=stats,
+        sms_jobs=sms_jobs,
+        issues=reconciliation_issues(),
+        selected_status=selected_status,
+        search=search,
+    )
+
+
+@bp.get("/commerce/export.csv")
+@login_required
+@admin_required
+def commerce_export():
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow([
+        "order_no", "created_at", "parent", "mobile", "child", "course", "status",
+        "gross_toman", "organization_toman", "parent_toman", "invoice_no", "authority", "ref_id",
+    ])
+    for order in CourseOrder.query.order_by(CourseOrder.created_at.desc()).all():
+        transaction = next((item for item in order.transactions if item.status in {"verified", "refunded"}), None)
+        writer.writerow([
+            order.order_no,
+            order.created_at.isoformat(),
+            order.user.full_name,
+            order.user.mobile,
+            order.child.name if order.child else "",
+            order.items[0].title_snapshot if order.items else "",
+            order.status,
+            order.gross_amount_toman,
+            order.organization_amount_toman,
+            order.payable_amount_toman,
+            order.invoice.invoice_no if order.invoice else "",
+            transaction.authority if transaction else "",
+            transaction.reference_id if transaction else "",
+        ])
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=valedgari-sales.csv"},
+    )
+
+
+@bp.route("/integrations", methods=["GET", "POST"])
+@login_required
+@admin_required
+def integrations():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_zarinpal":
+            mode = request.form.get("mode", "disabled")
+            callback_url = request.form.get("callback_url", "").strip()[:700]
+            if mode not in PAYMENT_MODES:
+                mode = "disabled"
+            if callback_url and not (
+                callback_url.startswith("https://")
+                or current_app.testing and callback_url.startswith("http://")
+            ):
+                flash("Callback در محیط واقعی باید با HTTPS آغاز شود.", "danger")
+            else:
+                save_setting("zarinpal.mode", mode, current_user.id)
+                save_setting("zarinpal.callback_url", callback_url, current_user.id)
+                merchant_id = request.form.get("merchant_id", "").strip()
+                if merchant_id:
+                    save_setting("zarinpal.merchant_id", merchant_id, current_user.id, secret=True)
+                db.session.commit()
+                flash("تنظیمات زرین‌پال ذخیره شد؛ مقدار محرمانه دوباره نمایش داده نمی‌شود.", "success")
+        elif action == "test_zarinpal":
+            callback_url = setting("zarinpal.callback_url") or url_for("parent.zarinpal_callback", _external=True)
+            try:
+                result = test_zarinpal_connection(callback_url)
+                flash(f"اتصال زرین‌پال تأیید شد؛ Authority آزمایشی: {result['authority']}", "success")
+            except GatewayError as exc:
+                flash(str(exc), "danger")
+        elif action == "save_ippanel":
+            save_setting("ippanel.enabled", "1" if request.form.get("enabled") == "1" else "0", current_user.id)
+            save_setting("ippanel.from_number", request.form.get("from_number", "").strip()[:40], current_user.id)
+            token = request.form.get("api_token", "").strip()
+            if token:
+                save_setting("ippanel.api_token", token, current_user.id, secret=True)
+            for event in SMS_EVENTS:
+                save_setting(f"ippanel.pattern.{event}", request.form.get(f"pattern_{event}", "").strip()[:100], current_user.id)
+            db.session.commit()
+            flash("تنظیمات و الگوهای IPPanel ذخیره شد.", "success")
+        elif action == "test_ippanel":
+            mobile = normalize_digits(request.form.get("test_mobile", "")).strip()
+            if not re.fullmatch(r"09\d{9}", mobile):
+                flash("شماره آزمایش پیامک معتبر نیست.", "danger")
+            else:
+                job = queue_sms(
+                    "course_reminder",
+                    mobile,
+                    {"name": "کاربر آزمایشی", "course": "آزمون اتصال والدیار", "progress": 0},
+                    f"ippanel-test:{utcnow().timestamp()}",
+                    message="پیام آزمایشی اتصال IPPanel والدیار",
+                )
+                try:
+                    process_sms(job)
+                    db.session.commit()
+                    flash("پیام آزمایشی ارسال و شناسه Outbox ثبت شد.", "success")
+                except SmsError as exc:
+                    db.session.commit()
+                    flash(str(exc), "danger")
+        else:
+            abort(400)
+        return redirect(url_for("admin.integrations"))
+    return render_template(
+        "admin/integrations.html",
+        zarinpal={
+            "mode": setting("zarinpal.mode", current_app.config.get("PAYMENT_MODE", "disabled")),
+            "callback_url": setting("zarinpal.callback_url"),
+            "hint": setting_hint("zarinpal.merchant_id"),
+        },
+        ippanel={
+            "enabled": setting("ippanel.enabled", "0") == "1",
+            "from_number": setting("ippanel.from_number"),
+            "hint": setting_hint("ippanel.api_token"),
+            "patterns": {event: setting(f"ippanel.pattern.{event}") for event in SMS_EVENTS},
+        },
+        sms_events=SMS_EVENTS,
     )
 
 
