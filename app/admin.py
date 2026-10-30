@@ -6,6 +6,7 @@ from datetime import date
 
 from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import or_
 
 from .extensions import db
 from .models import (
@@ -16,6 +17,7 @@ from .models import (
     AssistantMessage,
     Child,
     ChildProfileSnapshot,
+    ContractBeneficiary,
     ConsentRecord,
     DataDeletionRequest,
     DailyAction,
@@ -23,6 +25,8 @@ from .models import (
     DynamicForm,
     FormResponse,
     Organization,
+    OrganizationAuditLog,
+    OrganizationContract,
     PaymentAllocation,
     ParentingAssessment,
     ParentingStyleAssessment,
@@ -60,6 +64,8 @@ from .security import admin_required, scientific_staff_required
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 PROJECT_STATUSES = {"draft", "active", "paused", "closed"}
+ORGANIZATION_STATUSES = {"active", "inactive", "archived"}
+CONTRACT_STATUSES = {"draft", "active", "ended", "archived"}
 ALLOCATION_TRANSITIONS = {
     "reserved": {"parent_paid", "cancelled"},
     "parent_paid": {"settled", "cancelled"},
@@ -109,6 +115,85 @@ def audit_project(project, action, details=None):
             details_json=json.dumps(details or {}, ensure_ascii=False),
         )
     )
+
+
+def audit_organization(organization, action, details=None, contract=None):
+    db.session.add(
+        OrganizationAuditLog(
+            organization_id=organization.id,
+            organization_name=organization.name,
+            contract_id=contract.id if contract else None,
+            actor_id=current_user.id,
+            action=action,
+            details_json=json.dumps(details or {}, ensure_ascii=False),
+        )
+    )
+
+
+def organization_form_values():
+    status = request.form.get("status", "active")
+    return {
+        "name": request.form.get("name", "").strip()[:160],
+        "legal_name": request.form.get("legal_name", "").strip()[:200],
+        "registration_no": normalize_digits(
+            request.form.get("registration_no", "").strip()
+        )[:80],
+        "contact_name": request.form.get("contact_name", "").strip()[:120],
+        "contact_mobile": normalize_digits(
+            request.form.get("contact_mobile", "").strip()
+        )[:20],
+        "contact_email": request.form.get("contact_email", "").strip()[:160],
+        "address": request.form.get("address", "").strip()[:700],
+        "website": request.form.get("website", "").strip()[:300],
+        "logo_url": request.form.get("logo_url", "").strip()[:500],
+        "status": status if status in ORGANIZATION_STATUSES else "active",
+    }
+
+
+def contract_form_values(contract=None):
+    contract_no = normalize_digits(request.form.get("contract_no", "").strip()).upper()
+    status = request.form.get("status", "draft")
+    values = {
+        "title": request.form.get("title", "").strip()[:200],
+        "contract_no": contract_no[:80],
+        "body_text": request.form.get("body_text", "").strip(),
+        "terms_text": request.form.get("terms_text", "").strip(),
+        "commitments_text": request.form.get("commitments_text", "").strip(),
+        "starts_on": parse_iso_date(request.form.get("starts_on")),
+        "ends_on": parse_iso_date(request.form.get("ends_on")),
+        "total_amount_toman": parse_int(request.form.get("total_amount_toman")),
+        "amount_paid_toman": parse_int(request.form.get("amount_paid_toman")),
+        "status": status if status in CONTRACT_STATUSES else "draft",
+        "services_json": json.dumps(
+            [
+                item.strip()
+                for item in request.form.get("services", "").splitlines()
+                if item.strip()
+            ],
+            ensure_ascii=False,
+        ),
+        "document_name": request.form.get("document_name", "").strip()[:240],
+        "document_url": request.form.get("document_url", "").strip()[:700],
+    }
+    errors = []
+    duplicate = (
+        OrganizationContract.query.filter_by(contract_no=contract_no).first()
+        if contract_no
+        else None
+    )
+    if len(values["title"]) < 3:
+        errors.append("عنوان قرارداد باید حداقل سه نویسه باشد.")
+    if len(contract_no) < 3:
+        errors.append("شماره قرارداد را وارد کنید.")
+    elif duplicate and (not contract or duplicate.id != contract.id):
+        errors.append("شماره قرارداد قبلاً ثبت شده است.")
+    if values["total_amount_toman"] < 0 or values["amount_paid_toman"] < 0:
+        errors.append("مبالغ قرارداد نمی‌توانند منفی باشند.")
+    if values["amount_paid_toman"] > values["total_amount_toman"] and values["total_amount_toman"]:
+        errors.append("مبلغ پرداخت‌شده نمی‌تواند از مبلغ کل قرارداد بیشتر باشد.")
+    if values["starts_on"] and values["ends_on"] and values["starts_on"] > values["ends_on"]:
+        errors.append("تاریخ پایان قرارداد باید بعد از تاریخ شروع باشد.")
+    return values, errors
 
 
 def delete_child_records(child):
@@ -837,22 +922,383 @@ def assistant_control():
     )
 
 
+@bp.route("/organizations", methods=["GET", "POST"])
+@login_required
+@admin_required
+def organizations():
+    if request.method == "POST":
+        values = organization_form_values()
+        errors = []
+        if len(values["name"]) < 3:
+            errors.append("نام سازمان باید حداقل سه نویسه باشد.")
+        if values["registration_no"] and Organization.query.filter_by(
+            registration_no=values["registration_no"]
+        ).first():
+            errors.append("شناسه ثبت این سازمان قبلاً استفاده شده است.")
+        if errors:
+            for error in errors:
+                flash(error, "danger")
+        else:
+            organization = Organization(**values)
+            db.session.add(organization)
+            db.session.flush()
+            audit_organization(organization, "organization_created")
+            db.session.commit()
+            flash("سازمان ساخته شد؛ اکنون می‌توانید پروفایل یا قرارداد آن را تکمیل کنید.", "success")
+            return redirect(
+                url_for("admin.organization_detail", organization_id=organization.id)
+            )
+
+    query = Organization.query
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    if search:
+        query = query.filter(
+            or_(
+                Organization.name.contains(search),
+                Organization.legal_name.contains(search),
+                Organization.registration_no.contains(normalize_digits(search)),
+                Organization.contact_name.contains(search),
+            )
+        )
+    if status in ORGANIZATION_STATUSES:
+        query = query.filter_by(status=status)
+    rows = query.order_by(Organization.created_at.desc()).all()
+    totals = {
+        "all": Organization.query.count(),
+        "active": Organization.query.filter_by(status="active").count(),
+        "contracts": OrganizationContract.query.count(),
+        "archived_contracts": OrganizationContract.query.filter_by(status="archived").count(),
+    }
+    return render_template(
+        "admin/organizations.html",
+        organizations=rows,
+        totals=totals,
+        search=search,
+        selected_status=status,
+    )
+
+
+@bp.route("/organizations/<int:organization_id>", methods=["GET", "POST"])
+@login_required
+@admin_required
+def organization_detail(organization_id):
+    organization = db.get_or_404(Organization, organization_id)
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "update_organization":
+            values = organization_form_values()
+            duplicate = None
+            if values["registration_no"]:
+                duplicate = Organization.query.filter_by(
+                    registration_no=values["registration_no"]
+                ).first()
+            if len(values["name"]) < 3:
+                flash("نام سازمان باید حداقل سه نویسه باشد.", "danger")
+            elif duplicate and duplicate.id != organization.id:
+                flash("شناسه ثبت این سازمان قبلاً استفاده شده است.", "danger")
+            else:
+                before = {"name": organization.name, "status": organization.status}
+                for key, value in values.items():
+                    setattr(organization, key, value)
+                form_id = request.form.get("profile_form_id", type=int)
+                organization.profile_form = db.session.get(DynamicForm, form_id) if form_id else None
+                audit_organization(
+                    organization,
+                    "organization_updated",
+                    {"before": before, "after": {"name": organization.name, "status": organization.status}},
+                )
+                db.session.commit()
+                flash("پروفایل سازمان به‌روزرسانی شد.", "success")
+                return redirect(url_for("admin.organization_detail", organization_id=organization.id))
+        elif action == "save_dynamic_profile":
+            if not organization.profile_form:
+                flash("ابتدا یک فرم پروفایل برای سازمان انتخاب کنید.", "danger")
+            else:
+                data = {}
+                for field in organization.profile_form.fields:
+                    field_id = str(field.get("id", "")).strip()
+                    if field_id:
+                        data[field_id] = request.form.get(f"profile_{field_id}", "").strip()
+                organization.profile_data_json = json.dumps(data, ensure_ascii=False)
+                audit_organization(
+                    organization,
+                    "organization_dynamic_profile_updated",
+                    {"form_id": organization.profile_form_id, "field_count": len(data)},
+                )
+                db.session.commit()
+                flash("فیلدهای پویا در پروفایل سازمان ذخیره شد.", "success")
+                return redirect(url_for("admin.organization_detail", organization_id=organization.id))
+        elif action == "create_contract":
+            values, errors = contract_form_values()
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                contract = OrganizationContract(
+                    organization_id=organization.id,
+                    created_by=current_user.id,
+                    **values,
+                )
+                db.session.add(contract)
+                db.session.flush()
+                audit_organization(
+                    organization,
+                    "contract_created",
+                    {"contract_no": contract.contract_no, "status": contract.status},
+                    contract,
+                )
+                db.session.commit()
+                flash("قرارداد مستقل سازمان ساخته شد.", "success")
+                return redirect(url_for("admin.contract_detail", contract_id=contract.id))
+        elif action == "delete_organization":
+            has_beneficiaries = any(contract.beneficiaries for contract in organization.contracts)
+            has_consumption = any(
+                project.memberships
+                or any(membership.allocations for membership in project.memberships)
+                or project.committed_subsidy_toman
+                for project in organization.projects
+            )
+            if has_beneficiaries or has_consumption:
+                flash("سازمان دارای عضو، ذی‌نفع یا سابقه مصرف است و قابل حذف نیست؛ آن را بایگانی کنید.", "danger")
+            elif request.form.get("confirmation", "").strip() != organization.name:
+                flash("برای حذف، نام دقیق سازمان را وارد کنید.", "danger")
+            else:
+                name = organization.name
+                audit_organization(organization, "organization_deleted", {"name": name})
+                db.session.flush()
+                db.session.delete(organization)
+                db.session.commit()
+                flash(f"سازمان خالی «{name}» حذف شد.", "info")
+                return redirect(url_for("admin.organizations"))
+
+    forms = DynamicForm.query.filter(DynamicForm.status.in_(["draft", "published"])).order_by(
+        DynamicForm.title
+    ).all()
+    contracts = sorted(organization.contracts, key=lambda item: item.created_at, reverse=True)
+    children = {
+        child.id: child
+        for contract in contracts
+        for child in contract.covered_children
+    }.values()
+    totals = {
+        "contracts": len(contracts),
+        "active_contracts": organization.active_contract_count,
+        "parents": len({parent.id for contract in contracts for parent in contract.covered_parents}),
+        "children": len(children),
+        "committed": sum(contract.committed_amount_toman for contract in contracts),
+        "paid": sum(contract.amount_paid_toman for contract in contracts),
+    }
+    return render_template(
+        "admin/organization_detail.html",
+        organization=organization,
+        contracts=contracts,
+        forms=forms,
+        covered_children=sorted(children, key=lambda item: item.name),
+        totals=totals,
+    )
+
+
+@bp.route("/contracts/<int:contract_id>", methods=["GET", "POST"])
+@login_required
+@admin_required
+def contract_detail(contract_id):
+    contract = db.get_or_404(OrganizationContract, contract_id)
+    organization = contract.organization
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "update_contract":
+            values, errors = contract_form_values(contract)
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                before = {"status": contract.status, "contract_no": contract.contract_no}
+                for key, value in values.items():
+                    setattr(contract, key, value)
+                contract.version += 1
+                if contract.status == "archived" and not contract.archived_at:
+                    contract.archived_at = utcnow()
+                elif contract.status != "archived":
+                    contract.archived_at = None
+                audit_organization(
+                    organization,
+                    "contract_updated",
+                    {"before": before, "after": {"status": contract.status, "contract_no": contract.contract_no, "version": contract.version}},
+                    contract,
+                )
+                db.session.commit()
+                flash("قرارداد به‌روزرسانی شد.", "success")
+                return redirect(url_for("admin.contract_detail", contract_id=contract.id))
+        elif action == "archive_contract":
+            contract.status = "archived"
+            contract.archived_at = utcnow()
+            for project in contract.support_plans:
+                if project.status in {"active", "paused"}:
+                    project.status = "closed"
+                    audit_project(project, "project_archived_with_contract", {"contract_id": contract.id})
+            audit_organization(organization, "contract_archived", {}, contract)
+            db.session.commit()
+            flash("قرارداد و طرح‌های فعال آن بایگانی شدند؛ سوابق قابل مشاهده باقی ماندند.", "info")
+            return redirect(url_for("admin.contract_detail", contract_id=contract.id))
+        elif action == "create_support_plan":
+            if contract.status == "archived":
+                flash("برای قرارداد بایگانی‌شده نمی‌توان طرح جدید ساخت.", "danger")
+            else:
+                values, errors = project_form_values()
+                if errors:
+                    for error in errors:
+                        flash(error, "danger")
+                else:
+                    project = SponsoredProject(
+                        organization_id=organization.id,
+                        contract_id=contract.id,
+                        created_by=current_user.id,
+                        **values,
+                    )
+                    db.session.add(project)
+                    db.session.flush()
+                    audit_project(project, "project_created", {"contract_id": contract.id})
+                    audit_organization(
+                        organization,
+                        "support_plan_created",
+                        {"project_id": project.id, "code": project.code},
+                        contract,
+                    )
+                    db.session.commit()
+                    flash("طرح حمایت و کد استفاده زیر قرارداد ساخته شد.", "success")
+                    return redirect(url_for("admin.project_detail", project_id=project.id))
+        elif action == "add_beneficiary":
+            mobile = normalize_digits(request.form.get("mobile", "").strip())
+            user_id = request.form.get("user_id", type=int)
+            parent = db.session.get(User, user_id) if user_id else None
+            if parent and parent.role != "parent":
+                parent = None
+            if not parent and mobile:
+                parent = User.query.filter_by(mobile=mobile, role="parent").first()
+            child_id = request.form.get("child_id", type=int)
+            child = db.session.get(Child, child_id) if child_id else None
+            beneficiary_type = request.form.get("beneficiary_type", "family")
+            if not parent:
+                flash("والدی با این شماره موبایل پیدا نشد.", "danger")
+            elif child and child.user_id != parent.id:
+                flash("فرزند انتخاب‌شده متعلق به این والد نیست.", "danger")
+            else:
+                duplicate = ContractBeneficiary.query.filter_by(
+                    contract_id=contract.id,
+                    user_id=parent.id,
+                    child_id=child.id if child else None,
+                    status="active",
+                ).first()
+                if duplicate:
+                    flash("این ذی‌نفع قبلاً در قرارداد فعال است.", "warning")
+                else:
+                    beneficiary = ContractBeneficiary(
+                        contract_id=contract.id,
+                        user_id=parent.id,
+                        child_id=child.id if child else None,
+                        beneficiary_type=beneficiary_type if beneficiary_type in {"family", "guardian", "child"} else "family",
+                        starts_on=parse_iso_date(request.form.get("starts_on")),
+                        ends_on=parse_iso_date(request.form.get("ends_on")),
+                        note=request.form.get("note", "").strip()[:700],
+                    )
+                    db.session.add(beneficiary)
+                    audit_organization(
+                        organization,
+                        "beneficiary_added",
+                        {"user_id": parent.id, "child_id": child.id if child else None},
+                        contract,
+                    )
+                    db.session.commit()
+                    flash("ذی‌نفع به قرارداد اضافه شد.", "success")
+            return redirect(url_for("admin.contract_detail", contract_id=contract.id))
+        elif action == "end_beneficiary":
+            beneficiary = db.session.get(
+                ContractBeneficiary, request.form.get("beneficiary_id", type=int)
+            )
+            if not beneficiary or beneficiary.contract_id != contract.id:
+                abort(404)
+            beneficiary.status = "ended"
+            beneficiary.ended_at = utcnow()
+            audit_organization(
+                organization,
+                "beneficiary_ended",
+                {"beneficiary_id": beneficiary.id},
+                contract,
+            )
+            db.session.commit()
+            flash("پوشش ذی‌نفع پایان یافت و سابقه آن حفظ شد.", "info")
+            return redirect(url_for("admin.contract_detail", contract_id=contract.id))
+
+    return render_template(
+        "admin/contract_detail.html",
+        contract=contract,
+        organization=organization,
+        beneficiaries=contract.beneficiaries,
+        projects=sorted(contract.support_plans, key=lambda item: item.created_at, reverse=True),
+        parents=User.query.filter_by(role="parent").order_by(User.full_name).all(),
+        children=Child.query.order_by(Child.name).all(),
+    )
+
+
+@bp.get("/organizations/<int:organization_id>/export.csv")
+@login_required
+@admin_required
+def organization_export(organization_id):
+    organization = db.get_or_404(Organization, organization_id)
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(["سازمان", "قرارداد", "والد", "موبایل والد", "فرزند", "وضعیت قرارداد", "تعهد", "پرداخت‌شده"])
+    for contract in organization.contracts:
+        parents = contract.covered_parents or [None]
+        for parent in parents:
+            children = parent.children if parent else contract.covered_children
+            if not children:
+                children = [None]
+            for child in children:
+                writer.writerow([
+                    organization.name,
+                    contract.title,
+                    parent.full_name if parent else "",
+                    parent.mobile if parent else "",
+                    child.name if child else "",
+                    contract.status,
+                    contract.committed_amount_toman,
+                    contract.amount_paid_toman,
+                ])
+    audit_organization(organization, "organization_report_exported", {"format": "csv"})
+    db.session.commit()
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="organization-{organization.id}-report.csv"'},
+    )
+
+
 @bp.route("/projects", methods=["GET", "POST"])
 @login_required
 @admin_required
 def projects():
     organizations = Organization.query.order_by(Organization.name).all()
+    contracts = OrganizationContract.query.filter(
+        OrganizationContract.status.in_(["draft", "active"])
+    ).order_by(OrganizationContract.created_at.desc()).all()
     if request.method == "POST":
         values, errors = project_form_values()
+        contract_id = request.form.get("contract_id", type=int)
+        contract = db.session.get(OrganizationContract, contract_id) if contract_id else None
         organization_id = request.form.get("organization_id", type=int)
-        organization = db.session.get(Organization, organization_id) if organization_id else None
+        organization = contract.organization if contract else (
+            db.session.get(Organization, organization_id) if organization_id else None
+        )
         new_organization_name = request.form.get("new_organization_name", "").strip()
         if not organization and len(new_organization_name) < 3:
-            errors.append("یک سازمان موجود را انتخاب کنید یا نام سازمان جدید را وارد کنید.")
+            errors.append("یک قرارداد معتبر را انتخاب کنید.")
         if errors:
             for error in errors:
                 flash(error, "danger")
         else:
+            # Compatibility path for earlier clients; the new UI creates organization and contract separately.
             if not organization:
                 organization = Organization(
                     name=new_organization_name,
@@ -863,8 +1309,33 @@ def projects():
                 )
                 db.session.add(organization)
                 db.session.flush()
+                audit_organization(organization, "organization_created", {"source": "legacy_project_form"})
+            if not contract:
+                contract_no = f"LEGACY-{values['code']}"
+                contract = OrganizationContract.query.filter_by(contract_no=contract_no).first()
+                if not contract:
+                    contract = OrganizationContract(
+                        organization_id=organization.id,
+                        title=values["name"],
+                        contract_no=contract_no,
+                        status="active" if values["status"] == "active" else "draft",
+                        starts_on=values["starts_on"],
+                        ends_on=values["ends_on"],
+                        total_amount_toman=values["total_budget_toman"],
+                        services_json=values["eligible_services_json"],
+                        created_by=current_user.id,
+                    )
+                    db.session.add(contract)
+                    db.session.flush()
+                    audit_organization(
+                        organization,
+                        "contract_created",
+                        {"source": "legacy_project_form", "contract_no": contract.contract_no},
+                        contract,
+                    )
             project = SponsoredProject(
                 organization_id=organization.id,
+                contract_id=contract.id,
                 created_by=current_user.id,
                 **values,
             )
@@ -890,6 +1361,7 @@ def projects():
         "admin/projects.html",
         projects=project_rows,
         organizations=organizations,
+        contracts=contracts,
         totals=totals,
     )
 
@@ -903,17 +1375,19 @@ def project_detail(project_id):
         action = request.form.get("action")
         if action == "update_project":
             values, errors = project_form_values(project)
-            organization = db.session.get(
-                Organization, request.form.get("organization_id", type=int)
+            contract = db.session.get(
+                OrganizationContract, request.form.get("contract_id", type=int)
             )
-            if not organization:
-                errors.append("سازمان انتخاب‌شده معتبر نیست.")
+            organization = contract.organization if contract else project.organization
+            if contract and contract.status == "archived":
+                errors.append("قرارداد بایگانی‌شده قابل انتخاب نیست.")
             if errors:
                 for error in errors:
                     flash(error, "danger")
             else:
                 before = {"status": project.status, "code": project.code}
                 project.organization_id = organization.id
+                project.contract_id = contract.id if contract else project.contract_id
                 for key, value in values.items():
                     setattr(project, key, value)
                 audit_project(
@@ -976,12 +1450,16 @@ def project_detail(project_id):
             return redirect(url_for("admin.project_detail", project_id=project.id))
 
     organizations = Organization.query.order_by(Organization.name).all()
+    contracts = OrganizationContract.query.filter(
+        OrganizationContract.status != "archived"
+    ).order_by(OrganizationContract.created_at.desc()).all()
     memberships = sorted(project.memberships, key=lambda item: item.joined_at, reverse=True)
     split = project.calculate_split()
     return render_template(
         "admin/project_detail.html",
         project=project,
         organizations=organizations,
+        contracts=contracts,
         memberships=memberships,
         split=split,
     )

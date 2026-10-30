@@ -458,12 +458,183 @@ class Organization(db.Model):
     registration_no = db.Column(db.String(80), nullable=False, default="")
     contact_name = db.Column(db.String(120), nullable=False, default="")
     contact_mobile = db.Column(db.String(20), nullable=False, default="")
+    contact_email = db.Column(db.String(160), nullable=False, default="")
+    address = db.Column(db.String(700), nullable=False, default="")
+    website = db.Column(db.String(300), nullable=False, default="")
+    logo_url = db.Column(db.String(500), nullable=False, default="")
     status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    profile_form_id = db.Column(
+        db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=True, index=True
+    )
+    profile_data_json = db.Column(db.Text, nullable=False, default="{}")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
 
     projects = db.relationship(
         "SponsoredProject", backref="organization", lazy=True, cascade="all, delete-orphan"
     )
+    contracts = db.relationship(
+        "OrganizationContract",
+        backref="organization",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="OrganizationContract.created_at.desc()",
+    )
+    profile_form = db.relationship("DynamicForm")
+    audit_logs = db.relationship(
+        "OrganizationAuditLog",
+        backref="organization",
+        lazy=True,
+        passive_deletes=True,
+        order_by="OrganizationAuditLog.created_at.desc()",
+    )
+
+    @property
+    def profile_data(self):
+        try:
+            value = json.loads(self.profile_data_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def active_contract_count(self):
+        return sum(item.status in {"draft", "active"} for item in self.contracts)
+
+
+class OrganizationContract(db.Model):
+    __tablename__ = "organization_contracts"
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(
+        db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    title = db.Column(db.String(200), nullable=False)
+    contract_no = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    body_text = db.Column(db.Text, nullable=False, default="")
+    terms_text = db.Column(db.Text, nullable=False, default="")
+    commitments_text = db.Column(db.Text, nullable=False, default="")
+    starts_on = db.Column(db.Date, nullable=True)
+    ends_on = db.Column(db.Date, nullable=True)
+    total_amount_toman = db.Column(db.Integer, nullable=False, default=0)
+    amount_paid_toman = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    services_json = db.Column(db.Text, nullable=False, default="[]")
+    document_name = db.Column(db.String(240), nullable=False, default="")
+    document_url = db.Column(db.String(700), nullable=False, default="")
+    version = db.Column(db.Integer, nullable=False, default=1)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    beneficiaries = db.relationship(
+        "ContractBeneficiary",
+        backref="contract",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ContractBeneficiary.created_at.desc()",
+    )
+
+    @property
+    def services(self):
+        try:
+            value = json.loads(self.services_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def active_beneficiary_count(self):
+        return sum(item.status == "active" for item in self.beneficiaries)
+
+    @property
+    def committed_amount_toman(self):
+        return sum(project.committed_subsidy_toman for project in self.support_plans)
+
+    @property
+    def consumed_service_count(self):
+        return sum(
+            1
+            for project in self.support_plans
+            for membership in project.memberships
+            for allocation in membership.allocations
+            if allocation.status not in {"cancelled", "refunded"}
+        )
+
+    @property
+    def covered_parents(self):
+        values = {
+            item.parent
+            for item in self.beneficiaries
+            if item.parent is not None and item.status == "active"
+        }
+        values.update(
+            membership.parent
+            for project in self.support_plans
+            for membership in project.memberships
+            if membership.status in {"active", "pending"}
+        )
+        return sorted(values, key=lambda item: item.full_name)
+
+    @property
+    def covered_children(self):
+        values = {
+            item.child
+            for item in self.beneficiaries
+            if item.child is not None and item.status == "active"
+        }
+        for parent in self.covered_parents:
+            values.update(parent.children)
+        return sorted(values, key=lambda item: item.name)
+
+
+class ContractBeneficiary(db.Model):
+    __tablename__ = "contract_beneficiaries"
+    id = db.Column(db.Integer, primary_key=True)
+    contract_id = db.Column(
+        db.Integer, db.ForeignKey("organization_contracts.id"), nullable=False, index=True
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True, index=True)
+    beneficiary_type = db.Column(db.String(20), nullable=False, default="family", index=True)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    starts_on = db.Column(db.Date, nullable=True)
+    ends_on = db.Column(db.Date, nullable=True)
+    note = db.Column(db.String(700), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    ended_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    parent = db.relationship("User")
+    child = db.relationship("Child")
+
+
+class OrganizationAuditLog(db.Model):
+    __tablename__ = "organization_audit_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(
+        db.Integer,
+        db.ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    organization_name = db.Column(db.String(160), nullable=False, default="")
+    contract_id = db.Column(db.Integer, nullable=True, index=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    details_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    @property
+    def details(self):
+        try:
+            value = json.loads(self.details_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 
 
 class SponsoredProject(db.Model):
@@ -471,6 +642,9 @@ class SponsoredProject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(
         db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    contract_id = db.Column(
+        db.Integer, db.ForeignKey("organization_contracts.id"), nullable=True, index=True
     )
     name = db.Column(db.String(180), nullable=False)
     code = db.Column(db.String(32), unique=True, nullable=False, index=True)
@@ -498,6 +672,7 @@ class SponsoredProject(db.Model):
     audit_logs = db.relationship(
         "ProjectAuditLog", backref="project", lazy=True, cascade="all, delete-orphan"
     )
+    contract = db.relationship("OrganizationContract", backref="support_plans")
 
     @property
     def eligible_services(self):

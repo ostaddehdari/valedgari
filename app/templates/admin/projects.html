@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}پروژه‌های سازمانی | مدیریت والدیار{% endblock %}
+{% block title %}طرح‌های حمایت | مدیریت والدیار{% endblock %}
 {% block body_class %}admin-page{% endblock %}
 {% block content %}
 <section class="admin-header">
   <div class="container">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3">
-      <div><span class="eyebrow light">حمایت سازمانی</span><h1>پروژه‌ها و پرداخت سهمی</h1><p>مدیریت کد عضویت، سهم سازمان و والد، ظرفیت، بودجه و گزارش مالی.</p></div>
-      <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#newProject"><i class="fa-solid fa-plus ms-2"></i>پروژه جدید</button>
+      <div><span class="eyebrow light">اجرای قراردادها</span><h1>طرح‌های حمایت و پرداخت سهمی</h1><p>هر طرح، کد عضویت و سیاست ۷۰/۳۰ را زیر یک قرارداد مستقل اجرا می‌کند.</p></div>
+      <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#newProject"><i class="fa-solid fa-plus ms-2"></i>طرح جدید</button>
     </div>
   </div>
 </section>
@@ -17,7 +17,7 @@
     {% endfor %}
   </div>
   <div class="panel-card mt-4" data-animate="animate__fadeInUp">
-    <div class="panel-heading"><div><span class="eyebrow">دفتر پروژه‌ها</span><h2>طرح‌های حمایت مالی</h2></div><small class="text-muted">{{ projects|length }} پروژه</small></div>
+    <div class="panel-heading"><div><span class="eyebrow">دفتر طرح‌ها</span><h2>سیاست‌های حمایت مالی</h2></div><small class="text-muted">{{ projects|length }} طرح</small></div>
     {% if projects %}
       <div class="table-responsive"><table class="table align-middle admin-table project-table">
         <thead><tr><th>پروژه / سازمان</th><th>کد</th><th>الگوی سهم</th><th>عضو</th><th>تعهد سازمان</th><th>بودجه باقی‌مانده</th><th>وضعیت</th><th></th></tr></thead>
@@ -36,19 +36,16 @@
         {% endfor %}</tbody>
       </table></div>
     {% else %}
-      <div class="empty-state py-5"><div class="empty-icon"><i class="fa-solid fa-building-circle-check"></i></div><h2>اولین پروژه سازمانی را بسازید</h2><p>هم‌زمان سازمان، سیاست ۷۰/۳۰، کد و دفتر بودجه ایجاد می‌شود.</p><button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#newProject">ساخت پروژه</button></div>
+      <div class="empty-state py-5"><div class="empty-icon"><i class="fa-solid fa-ticket"></i></div><h2>اولین طرح حمایتی را بسازید</h2><p>ابتدا سازمان و قرارداد را مستقل ثبت کنید؛ سپس سیاست ۷۰/۳۰ را زیر قرارداد بسازید.</p><a class="btn btn-outline-custom ms-2" href="{{ url_for('admin.organizations') }}">مدیریت سازمان‌ها</a><button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#newProject">ساخت طرح</button></div>
     {% endif %}
   </div>
 </div>
 
 <div class="modal fade" id="newProject" tabindex="-1" aria-labelledby="newProjectTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
   <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="modal-header"><div><span class="eyebrow mb-2">پروژه جدید</span><h2 class="modal-title fs-4" id="newProjectTitle">تعریف سازمان و سیاست حمایت</h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="بستن"></button></div>
+    <div class="modal-header"><div><span class="eyebrow mb-2">طرح جدید</span><h2 class="modal-title fs-4" id="newProjectTitle">تعریف سیاست حمایت زیر قرارداد</h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="بستن"></button></div>
     <div class="modal-body"><div class="row g-4">
-      <div class="col-lg-6"><div class="form-section"><h3><i class="fa-solid fa-building ms-2"></i>سازمان</h3>
-        <label class="form-label">انتخاب سازمان موجود</label><select class="form-select" name="organization_id"><option value="">سازمان جدید</option>{% for org in organizations %}<option value="{{ org.id }}">{{ org.name }}</option>{% endfor %}</select>
-        <div class="row g-3 mt-1"><div class="col-md-6"><label class="form-label">نام سازمان جدید</label><input class="form-control" name="new_organization_name" placeholder="مثلاً شرکت نمونه"></div><div class="col-md-6"><label class="form-label">نام حقوقی</label><input class="form-control" name="legal_name"></div><div class="col-md-6"><label class="form-label">شناسه ثبت</label><input class="form-control" name="registration_no"></div><div class="col-md-6"><label class="form-label">مسئول تماس</label><input class="form-control" name="contact_name"></div><div class="col-md-6"><label class="form-label">موبایل مسئول</label><input class="form-control" name="contact_mobile" inputmode="numeric"></div></div>
-      </div></div>
+      <div class="col-lg-6"><div class="form-section"><h3><i class="fa-solid fa-file-signature ms-2"></i>قرارداد مبنا</h3><label class="form-label">انتخاب قرارداد *</label><select class="form-select" name="contract_id" required><option value="">انتخاب کنید</option>{% for contract in contracts %}<option value="{{ contract.id }}">{{ contract.organization.name }} · {{ contract.title }} · {{ contract.contract_no }}</option>{% endfor %}</select><p class="form-text mt-3">سازمان و قرارداد در این فرم ساخته نمی‌شوند. برای پرونده جدید به <a href="{{ url_for('admin.organizations') }}">صفحه سازمان‌ها</a> بروید.</p></div></div>
       <div class="col-lg-6"><div class="form-section"><h3><i class="fa-solid fa-ticket ms-2"></i>پروژه و کد</h3>
         <div class="row g-3"><div class="col-md-8"><label class="form-label">عنوان پروژه *</label><input class="form-control" name="name" required placeholder="پایلوت والدگری کارکنان"></div><div class="col-md-4"><label class="form-label">کد حمایت *</label><input class="form-control text-uppercase" name="code" dir="ltr" required placeholder="ORG-70"></div><div class="col-md-6"><label class="form-label">وضعیت</label><select class="form-select" name="status"><option value="draft">پیش‌نویس</option><option value="active">فعال</option><option value="paused">متوقف</option></select></div><div class="col-md-6"><label class="form-label">خدمات مشمول، هر خط یک مورد</label><textarea class="form-control" name="eligible_services" rows="2">دسترسی والدیار</textarea></div><div class="col-12"><label class="form-label">توضیح</label><textarea class="form-control" name="description" rows="2"></textarea></div></div>
       </div></div>
@@ -62,7 +59,7 @@
       </div></div></div>
       <div class="col-lg-5"><div class="form-section"><h3><i class="fa-solid fa-calendar-check ms-2"></i>ظرفیت و اعتبار</h3><div class="row g-3"><div class="col-12"><label class="form-label">ظرفیت والد</label><input class="form-control" name="capacity" value="10" inputmode="numeric"></div><div class="col-6"><label class="form-label">شروع</label><input class="form-control" type="date" name="starts_on"></div><div class="col-6"><label class="form-label">پایان</label><input class="form-control" type="date" name="ends_on"></div></div></div></div>
     </div></div>
-    <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">انصراف</button><button class="btn btn-primary-custom" type="submit"><i class="fa-solid fa-check ms-2"></i>ساخت پروژه و دفتر مالی</button></div>
+    <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">انصراف</button><button class="btn btn-primary-custom" type="submit"><i class="fa-solid fa-check ms-2"></i>ساخت طرح و دفتر مالی</button></div>
   </form>
 </div></div></div>
 {% endblock %}

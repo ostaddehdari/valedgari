@@ -10,11 +10,15 @@ from app.models import (
     Child,
     ChildProfileSnapshot,
     ConsentRecord,
+    ContractBeneficiary,
     DataDeletionRequest,
     DailyAction,
+    DynamicForm,
     HomeActionOutcome,
     MicroLesson,
     Organization,
+    OrganizationAuditLog,
+    OrganizationContract,
     ParentingAssessment,
     ParentingStyleAssessment,
     PaymentAllocation,
@@ -906,7 +910,7 @@ def test_admin_dashboard_sidebar_marks_active_page(client):
     response = client.get("/admin/projects")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "پروژه‌های سازمانی" in html
+    assert "طرح‌های حمایت" in html
     assert "کاربران" in html
     assert 'aria-current="page"' in html
     assert "داشبورد من" not in html
@@ -930,4 +934,223 @@ def test_dashboard_css_contains_scrollable_modal_contract(client):
     css = client.get("/static/css/app.css").get_data(as_text=True)
     assert ".modal-dialog-scrollable .modal-content>form>.modal-body" in css
     assert "overflow-y:auto" in css
+
+
+def create_stage_eight_organization(client, app, name="سازمان مستقل"):
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/organizations",
+        data={
+            "name": name,
+            "legal_name": "شرکت مستقل نمونه",
+            "registration_no": "",
+            "contact_name": "مسئول قرارداد",
+            "contact_mobile": "09121112222",
+            "status": "active",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        return Organization.query.filter_by(name=name).one().id
+
+
+def create_stage_eight_contract(client, app, organization_id, status="active", contract_no="CNT-1405-01"):
+    response = client.post(
+        f"/admin/organizations/{organization_id}",
+        data={
+            "action": "create_contract",
+            "title": "قرارداد آموزش والدین",
+            "contract_no": contract_no,
+            "status": status,
+            "starts_on": "2026-10-01",
+            "ends_on": "2027-10-01",
+            "total_amount_toman": "10000000",
+            "amount_paid_toman": "3000000",
+            "body_text": "متن قرارداد نمونه",
+            "terms_text": "شرایط اجرای خدمات مجازی",
+            "commitments_text": "تعهد سازمان و والدیار",
+            "services": "دوره والدگری\nسنجش اولیه",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        return OrganizationContract.query.filter_by(contract_no=contract_no).one().id
+
+
+def test_stage_eight_organization_is_created_without_implicit_contract(client, app):
+    organization_id = create_stage_eight_organization(client, app)
+    response = client.get("/admin/organizations")
+    assert response.status_code == 200
+    assert "سازمان مستقل" in response.get_data(as_text=True)
+    profile = client.get(f"/admin/organizations/{organization_id}")
+    assert profile.status_code == 200
+    assert "قرارداد جدید" in profile.get_data(as_text=True)
+    with app.app_context():
+        organization = db.session.get(Organization, organization_id)
+        assert organization.contracts == []
+        assert organization.projects == []
+        assert OrganizationAuditLog.query.filter_by(action="organization_created").count() == 1
+
+
+def test_organization_without_members_can_be_deleted_but_covered_one_cannot(client, app):
+    empty_id = create_stage_eight_organization(client, app, name="سازمان قابل حذف")
+    deleted = client.post(
+        f"/admin/organizations/{empty_id}",
+        data={"action": "delete_organization", "confirmation": "سازمان قابل حذف"},
+    )
+    assert deleted.status_code == 302
+    with app.app_context():
+        assert db.session.get(Organization, empty_id) is None
+        assert OrganizationAuditLog.query.filter_by(action="organization_deleted").count() == 1
+
+    unused_id = create_stage_eight_organization(client, app, name="سازمان قرارداد بدون مصرف")
+    create_stage_eight_contract(client, app, unused_id)
+    removed_unused = client.post(
+        f"/admin/organizations/{unused_id}",
+        data={"action": "delete_organization", "confirmation": "سازمان قرارداد بدون مصرف"},
+    )
+    assert removed_unused.status_code == 302
+    with app.app_context():
+        assert db.session.get(Organization, unused_id) is None
+
+    protected_id = create_stage_eight_organization(client, app, name="سازمان دارای ذی‌نفع")
+    contract_id = create_stage_eight_contract(client, app, protected_id, contract_no="CNT-1405-02")
+    with app.app_context():
+        parent_id = User.query.filter_by(mobile="09120000002").one().id
+    client.post(
+        f"/admin/contracts/{contract_id}",
+        data={"action": "add_beneficiary", "user_id": parent_id, "beneficiary_type": "family"},
+    )
+    blocked = client.post(
+        f"/admin/organizations/{protected_id}",
+        data={"action": "delete_organization", "confirmation": "سازمان دارای ذی‌نفع"},
+        follow_redirects=True,
+    )
+    assert "قابل حذف نیست" in blocked.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(Organization, protected_id) is not None
+
+
+def test_organization_profile_can_use_form_builder_fields(client, app):
+    organization_id = create_stage_eight_organization(client, app)
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        profile_form = DynamicForm(
+            title="فرم پروفایل سازمان",
+            slug="organization-profile",
+            status="published",
+            schema_json=json.dumps(
+                [{"id": "sector", "type": "text", "label": "حوزه فعالیت", "required": True}],
+                ensure_ascii=False,
+            ),
+            created_by=admin.id,
+        )
+        db.session.add(profile_form)
+        db.session.commit()
+        form_id = profile_form.id
+    updated = client.post(
+        f"/admin/organizations/{organization_id}",
+        data={
+            "action": "update_organization",
+            "name": "سازمان مستقل",
+            "legal_name": "شرکت مستقل نمونه",
+            "registration_no": "",
+            "status": "active",
+            "profile_form_id": form_id,
+        },
+    )
+    assert updated.status_code == 302
+    saved = client.post(
+        f"/admin/organizations/{organization_id}",
+        data={"action": "save_dynamic_profile", "profile_sector": "فناوری آموزشی"},
+    )
+    assert saved.status_code == 302
+    with app.app_context():
+        organization = db.session.get(Organization, organization_id)
+        assert organization.profile_form_id == form_id
+        assert organization.profile_data["sector"] == "فناوری آموزشی"
+
+
+def test_contract_beneficiary_links_parent_and_child(client, app):
+    organization_id = create_stage_eight_organization(client, app)
+    contract_id = create_stage_eight_contract(client, app, organization_id)
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1393, gender="girl")
+        db.session.add(child)
+        db.session.commit()
+        parent_id, child_id = parent.id, child.id
+    response = client.post(
+        f"/admin/contracts/{contract_id}",
+        data={
+            "action": "add_beneficiary",
+            "user_id": parent_id,
+            "child_id": child_id,
+            "beneficiary_type": "child",
+        },
+    )
+    assert response.status_code == 302
+    page = client.get(f"/admin/contracts/{contract_id}")
+    assert page.status_code == 200
+    assert "ذی‌نفعان قرارداد" in page.get_data(as_text=True)
+    with app.app_context():
+        beneficiary = ContractBeneficiary.query.one()
+        contract = db.session.get(OrganizationContract, contract_id)
+        assert beneficiary.parent.mobile == "09120000002"
+        assert beneficiary.child.name == "سارا"
+        assert [item.name for item in contract.covered_children] == ["سارا"]
+
+
+def test_contract_support_plan_metrics_and_archive_preserve_history(client, app):
+    organization_id = create_stage_eight_organization(client, app)
+    contract_id = create_stage_eight_contract(client, app, organization_id)
+    created = client.post(
+        f"/admin/contracts/{contract_id}",
+        data={
+            "action": "create_support_plan",
+            "name": "طرح هفتاد سی کارکنان",
+            "code": "STAGE8-70",
+            "status": "active",
+            "pricing_model": "percent",
+            "service_price_toman": "1000000",
+            "organization_share_percent": "70",
+            "organization_fixed_toman": "0",
+            "subsidy_cap_per_parent_toman": "0",
+            "total_budget_toman": "7000000",
+            "capacity": "20",
+            "eligible_services": "دوره والدگری",
+        },
+    )
+    assert created.status_code == 302
+    archived = client.post(
+        f"/admin/contracts/{contract_id}", data={"action": "archive_contract"}
+    )
+    assert archived.status_code == 302
+    with app.app_context():
+        contract = db.session.get(OrganizationContract, contract_id)
+        project = SponsoredProject.query.filter_by(code="STAGE8-70").one()
+        assert project.contract_id == contract.id
+        assert contract.status == "archived"
+        assert contract.archived_at is not None
+        assert project.status == "closed"
+
+
+def test_organization_report_contains_covered_child(client, app):
+    organization_id = create_stage_eight_organization(client, app)
+    contract_id = create_stage_eight_contract(client, app, organization_id)
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="علی", birth_year=1391, gender="boy")
+        db.session.add(child)
+        db.session.commit()
+        parent_id, child_id = parent.id, child.id
+    client.post(
+        f"/admin/contracts/{contract_id}",
+        data={"action": "add_beneficiary", "user_id": parent_id, "child_id": child_id, "beneficiary_type": "child"},
+    )
+    report = client.get(f"/admin/organizations/{organization_id}/export.csv")
+    assert report.status_code == 200
+    text = report.get_data(as_text=True)
+    assert "علی" in text
+    assert "09120000002" in text
 
