@@ -3,6 +3,8 @@
 import json
 from datetime import date
 
+from flask import current_app
+
 from .extensions import db
 from .models import (
     Child,
@@ -154,8 +156,13 @@ def _parent_and_child(index, group):
     mobile = f"{PILOT_MOBILE_PREFIX}{index:06d}"
     user = User.query.filter_by(mobile=mobile).first()
     if not user:
+        password = current_app.config.get("PILOT_DEFAULT_PASSWORD", "")
+        if not password:
+            raise RuntimeError(
+                "برای ساخت حساب‌های پایلوت، PILOT_DEFAULT_PASSWORD را خارج از مخزن تنظیم کنید."
+            )
         user = User(mobile=mobile, full_name=f"والد پایلوت {index:02d}", role="parent")
-        user.set_password("PilotPass1405!")
+        user.set_password(password)
         db.session.add(user)
     user.full_name = f"والد پایلوت {index:02d}"
     user.national_id = f"41{index:08d}"[-10:]

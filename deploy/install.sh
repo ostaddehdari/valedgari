@@ -43,6 +43,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     echo "AUTO_CREATE_SCHEMA=0"
     echo "ADMIN_PAGE_SIZE=50"
     echo "EXPORT_ROW_LIMIT=5000"
+    echo "PILOT_DEFAULT_PASSWORD="
     echo "REQUIRE_SCIENTIFIC_APPROVAL=1"
     echo "ANONYMOUS_REPORT_MIN_GROUP=5"
     echo "PAYMENT_PROVIDER=manual"

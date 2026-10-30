@@ -109,6 +109,7 @@ APP_VERSION=stage-15
 AUTO_CREATE_SCHEMA=0
 ADMIN_PAGE_SIZE=50
 EXPORT_ROW_LIMIT=5000
+PILOT_DEFAULT_PASSWORD=یک-رمز-قوی-ویژه-پایلوت
 REQUIRE_SCIENTIFIC_APPROVAL=1
 ANONYMOUS_REPORT_MIN_GROUP=5
 PAYMENT_PROVIDER=manual
@@ -130,7 +131,7 @@ systemctl restart valedgari
 ```bash
 cd /var/www/valedgari
 git pull --ff-only
-VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
+PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
 
 ## ۸) بکاپ و مانور بازیابی

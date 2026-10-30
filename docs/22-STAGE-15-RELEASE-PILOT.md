@@ -17,7 +17,7 @@
 Seed تکرارپذیر است؛ اجرای دوباره سازمان، قرارداد، والد، فرزند، عضویت یا پروفایل تکراری نمی‌سازد.
 
 ```bash
-flask --app wsgi:app seed-stage15-pilot
+PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' flask --app wsgi:app seed-stage15-pilot
 ```
 
 ## پروفایل نقش‌محور
@@ -33,7 +33,7 @@ flask --app wsgi:app seed-stage15-pilot
 5. سرویس restart و `/health/release` بررسی می‌شود.
 
 ```bash
-VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
+PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
 
 ## کنترل‌های استیج ۱۵
