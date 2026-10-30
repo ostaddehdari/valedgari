@@ -17,7 +17,10 @@
 Seed تکرارپذیر است؛ اجرای دوباره سازمان، قرارداد، والد، فرزند، عضویت یا پروفایل تکراری نمی‌سازد.
 
 ```bash
-PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' flask --app wsgi:app seed-stage15-pilot
+read -rsp 'Pilot password: ' PILOT_DEFAULT_PASSWORD
+export PILOT_DEFAULT_PASSWORD
+flask --app wsgi:app seed-stage15-pilot
+unset PILOT_DEFAULT_PASSWORD
 ```
 
 ## پروفایل نقش‌محور
@@ -33,8 +36,10 @@ PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' flask --app ws
 5. سرویس restart و `/health/release` بررسی می‌شود.
 
 ```bash
-PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
+VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
+
+در production مقدار `PILOT_DEFAULT_PASSWORD` باید از قبل در فایل root-only `/etc/valedgari.env` ثبت شده باشد و نباید در خط فرمان قرار گیرد.
 
 ## کنترل‌های استیج ۱۵
 

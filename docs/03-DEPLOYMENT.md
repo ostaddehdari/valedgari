@@ -131,8 +131,10 @@ systemctl restart valedgari
 ```bash
 cd /var/www/valedgari
 git pull --ff-only
-PILOT_DEFAULT_PASSWORD='یک-رمز-قوی-ویژه-پایلوت' VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
+VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
+
+رمز `PILOT_DEFAULT_PASSWORD` را پیش از اجرا فقط در `/etc/valedgari.env` با مجوز `600` قرار دهید؛ آن را در خط فرمان یا history ننویسید.
 
 ## ۸) بکاپ و مانور بازیابی
 
