@@ -104,7 +104,7 @@ pytest -q
 FLASK_ENV=production
 SECRET_KEY=generated-secret
 DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db
-APP_VERSION=stage-12
+APP_VERSION=stage-13
 REQUIRE_SCIENTIFIC_APPROVAL=1
 ANONYMOUS_REPORT_MIN_GROUP=5
 PAYMENT_PROVIDER=manual

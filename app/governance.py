@@ -4,6 +4,7 @@ from .models import (
     MicroLesson,
     PersonalizationRule,
     SafetyProtocol,
+    ScenarioNarrative,
     ScientificReview,
 )
 
@@ -14,6 +15,7 @@ RESOURCE_MODELS = {
     "rule": PersonalizationRule,
     "protocol": SafetyProtocol,
     "form": DynamicForm,
+    "scenario_narrative": ScenarioNarrative,
 }
 
 
@@ -73,6 +75,30 @@ def resource_snapshot(resource_type, resource):
             "fields": resource.fields,
             "settings": resource.settings,
             "scoring": resource.scoring,
+        }
+    elif resource_type == "scenario_narrative":
+        payload = {
+            "title": resource.title,
+            "version": resource.version,
+            "topic": resource.topic.slug,
+            "level": resource.level,
+            "context": resource.context_text,
+            "age": [resource.child_age_min, resource.child_age_max],
+            "child_quote": resource.child_quote,
+            "source_note": resource.source_note,
+            "reactions": [
+                {
+                    "style": item.style.code,
+                    "text": item.reaction_text,
+                    "present_skills": item.present_skill_ids,
+                    "missing_skills": item.missing_skill_ids,
+                    "short_term": item.short_term_consequence,
+                    "long_term": item.long_term_consequence,
+                    "retry": item.retry_guidance,
+                    "score": item.scientific_score,
+                }
+                for item in resource.reactions
+            ],
         }
     else:
         raise ValueError("نوع منبع علمی پشتیبانی نمی‌شود.")

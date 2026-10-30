@@ -826,6 +826,183 @@ class ScenarioAttempt(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class ScenarioTopicProfile(db.Model):
+    """Stage 13 metadata kept separate from the legacy topic table for safe migration."""
+
+    __tablename__ = "scenario_topic_profiles"
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, unique=True, index=True
+    )
+    domain = db.Column(db.String(100), nullable=False, default="ارتباط خانوادگی", index=True)
+    target_skill_id = db.Column(
+        db.Integer, db.ForeignKey("skill_modules.id"), nullable=True, index=True
+    )
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0, index=True)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    topic = db.relationship("ScenarioTopic", backref=db.backref("catalog_profile", uselist=False))
+    target_skill = db.relationship("SkillModule")
+
+
+class CrisisLevelDefinition(db.Model):
+    __tablename__ = "crisis_level_definitions"
+    id = db.Column(db.Integer, primary_key=True)
+    level = db.Column(db.Integer, nullable=False, unique=True, index=True)
+    code = db.Column(db.String(40), nullable=False, unique=True)
+    title = db.Column(db.String(80), nullable=False)
+    color = db.Column(db.String(20), nullable=False)
+    description = db.Column(db.String(700), nullable=False, default="")
+    behavioral_markers_json = db.Column(db.Text, nullable=False, default="[]")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    @property
+    def behavioral_markers(self):
+        try:
+            value = json.loads(self.behavioral_markers_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+
+class ParentingStyleDefinition(db.Model):
+    __tablename__ = "parenting_style_definitions"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(40), nullable=False, unique=True, index=True)
+    title = db.Column(db.String(80), nullable=False)
+    description = db.Column(db.String(700), nullable=False, default="")
+    traits_json = db.Column(db.Text, nullable=False, default="[]")
+    color = db.Column(db.String(20), nullable=False, default="#176254")
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    @property
+    def traits(self):
+        try:
+            value = json.loads(self.traits_json or "[]")
+            return value if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+
+class ScenarioNarrative(db.Model):
+    __tablename__ = "scenario_narratives"
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True
+    )
+    level = db.Column(db.Integer, nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    context_text = db.Column(db.Text, nullable=False)
+    child_age_min = db.Column(db.Integer, nullable=False, default=6)
+    child_age_max = db.Column(db.Integer, nullable=False, default=18)
+    child_quote = db.Column(db.String(700), nullable=False, default="")
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    source_note = db.Column(db.String(700), nullable=False, default="")
+    copied_from_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=True, index=True
+    )
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    published_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    topic = db.relationship("ScenarioTopic")
+    creator = db.relationship("User")
+    copied_from = db.relationship("ScenarioNarrative", remote_side=[id])
+    reactions = db.relationship(
+        "ScenarioReaction",
+        backref="narrative",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ScenarioReaction.id",
+    )
+
+    __table_args__ = (
+        db.CheckConstraint("level >= 1 AND level <= 5", name="ck_narrative_level"),
+        db.CheckConstraint("child_age_min >= 0", name="ck_narrative_age_min"),
+        db.CheckConstraint("child_age_max >= child_age_min", name="ck_narrative_age_range"),
+    )
+
+
+class ScenarioReaction(db.Model):
+    __tablename__ = "scenario_reactions"
+    id = db.Column(db.Integer, primary_key=True)
+    narrative_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=False, index=True
+    )
+    style_id = db.Column(
+        db.Integer, db.ForeignKey("parenting_style_definitions.id"), nullable=False, index=True
+    )
+    reaction_text = db.Column(db.Text, nullable=False)
+    present_skill_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    missing_skill_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    short_term_consequence = db.Column(db.Text, nullable=False, default="")
+    long_term_consequence = db.Column(db.Text, nullable=False, default="")
+    retry_guidance = db.Column(db.Text, nullable=False, default="")
+    scientific_score = db.Column(db.Integer, nullable=False, default=0)
+
+    style = db.relationship("ParentingStyleDefinition")
+    __table_args__ = (
+        db.UniqueConstraint("narrative_id", "style_id"),
+        db.CheckConstraint(
+            "scientific_score >= 0 AND scientific_score <= 100",
+            name="ck_reaction_scientific_score",
+        ),
+    )
+
+    @staticmethod
+    def _ids(value):
+        try:
+            return [int(item) for item in json.loads(value or "[]")]
+        except (TypeError, ValueError):
+            return []
+
+    @property
+    def present_skill_ids(self):
+        return self._ids(self.present_skill_ids_json)
+
+    @property
+    def missing_skill_ids(self):
+        return self._ids(self.missing_skill_ids_json)
+
+
+class ScenarioNarrativeAttempt(db.Model):
+    __tablename__ = "scenario_narrative_attempts"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    narrative_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=False, index=True
+    )
+    selected_reaction_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_reactions.id"), nullable=False, index=True
+    )
+    retry_of_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narrative_attempts.id"), nullable=True, index=True
+    )
+    option_order_json = db.Column(db.Text, nullable=False, default="[]")
+    score = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    narrative = db.relationship("ScenarioNarrative")
+    selected_reaction = db.relationship("ScenarioReaction")
+    retry_of = db.relationship("ScenarioNarrativeAttempt", remote_side=[id])
+
+    @property
+    def option_order(self):
+        try:
+            return [int(item) for item in json.loads(self.option_order_json or "[]")]
+        except (TypeError, ValueError):
+            return []
+
+
 class DynamicForm(db.Model):
     __tablename__ = "dynamic_forms"
     id = db.Column(db.Integer, primary_key=True)

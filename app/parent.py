@@ -38,6 +38,9 @@ from .models import (
     RecommendationRun,
     ScenarioAttempt,
     ScenarioLevel,
+    ScenarioNarrative,
+    ScenarioNarrativeAttempt,
+    ScenarioReaction,
     ScenarioTopic,
     SkillModule,
     SkillProgress,
@@ -60,6 +63,12 @@ from .form_engine import (
     validate_answers,
 )
 from .course_engine import enrollment_for, recommended_courses
+from .scenario_engine import (
+    choose_narrative,
+    feedback_for,
+    reaction_options,
+    skill_score_summary,
+)
 from .commerce import (
     CommerceError,
     GatewayError,
@@ -1284,15 +1293,59 @@ def scenario():
     child = owned_child()
     if not child:
         return redirect(url_for("parent.children"))
-    topics = ScenarioTopic.query.filter_by(is_published=True).all()
+    topics = ScenarioTopic.query.filter_by(is_published=True).order_by(ScenarioTopic.id).all()
     selected_topic = request.values.get("topic_id", type=int)
     selected_level = request.values.get("level", 1, type=int)
     level = None
     if selected_topic:
         level = ScenarioLevel.query.filter_by(topic_id=selected_topic, level=selected_level).first()
     recommendation = build_personalized_recommendation(current_user.id, child, level) if level else None
+    attempt_result = None
+    result_id = request.args.get("attempt_id", type=int)
+    if result_id:
+        attempt_result = ScenarioNarrativeAttempt.query.filter_by(
+            id=result_id, user_id=current_user.id, child_id=child.id
+        ).first_or_404()
     if request.method == "POST" and level:
         action = request.form.get("action", "decision")
+        if action == "narrative_attempt":
+            narrative = ScenarioNarrative.query.filter_by(
+                id=request.form.get("narrative_id", type=int),
+                topic_id=level.topic_id,
+                level=level.level,
+                status="published",
+            ).first_or_404()
+            reaction = ScenarioReaction.query.filter_by(
+                id=request.form.get("reaction_id", type=int), narrative_id=narrative.id
+            ).first_or_404()
+            _same, order = choose_narrative(current_user.id, child, level.topic_id, level.level)
+            if _same is None or _same.id != narrative.id:
+                order = [item.id for item in narrative.reactions]
+            retry_of = ScenarioNarrativeAttempt.query.filter_by(
+                id=request.form.get("retry_of_id", type=int),
+                user_id=current_user.id,
+                child_id=child.id,
+                narrative_id=narrative.id,
+            ).first()
+            attempt = ScenarioNarrativeAttempt(
+                user_id=current_user.id,
+                child_id=child.id,
+                narrative_id=narrative.id,
+                selected_reaction_id=reaction.id,
+                retry_of_id=retry_of.id if retry_of else None,
+                option_order_json=json.dumps(order),
+                score=reaction.scientific_score,
+            )
+            db.session.add(attempt)
+            db.session.commit()
+            return redirect(
+                url_for(
+                    "parent.scenario",
+                    topic_id=level.topic_id,
+                    level=level.level,
+                    attempt_id=attempt.id,
+                )
+            )
         if action == "plan_recommendation" and recommendation:
             rule = recommendation["rule"]
             run = RecommendationRun(
@@ -1325,6 +1378,20 @@ def scenario():
             )
         )
         db.session.commit()
+    training_narrative = None
+    training_order = []
+    if level and not attempt_result:
+        training_narrative, training_order = choose_narrative(
+            current_user.id, child, level.topic_id, level.level
+        )
+    training_options = (
+        reaction_options(training_narrative, training_order) if training_narrative else []
+    )
+    retry_options = (
+        reaction_options(attempt_result.narrative, list(reversed(attempt_result.option_order)))
+        if attempt_result
+        else []
+    )
     return render_template(
         "parent/scenario.html",
         child=child,
@@ -1333,6 +1400,12 @@ def scenario():
         selected_level=selected_level,
         level=level,
         recommendation=recommendation,
+        training_narrative=training_narrative,
+        training_options=training_options,
+        attempt_result=attempt_result,
+        attempt_feedback=feedback_for(attempt_result.selected_reaction) if attempt_result else None,
+        retry_options=retry_options,
+        skill_summary=skill_score_summary(current_user.id, child.id),
     )
 
 

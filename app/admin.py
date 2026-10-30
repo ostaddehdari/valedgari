@@ -30,6 +30,7 @@ from .models import (
     CourseTopicMembership,
     CourseUnit,
     CourseUnitProgress,
+    CrisisLevelDefinition,
     DataDeletionRequest,
     DailyAction,
     DecisionNode,
@@ -45,6 +46,7 @@ from .models import (
     PaymentAllocation,
     PaymentTransaction,
     ParentingAssessment,
+    ParentingStyleDefinition,
     ParentingStyleAssessment,
     PersonalizationRule,
     ProfileDefinition,
@@ -54,7 +56,11 @@ from .models import (
     ProjectMembership,
     ScenarioAttempt,
     ScenarioLevel,
+    ScenarioNarrative,
+    ScenarioNarrativeAttempt,
+    ScenarioReaction,
     ScenarioTopic,
+    ScenarioTopicProfile,
     SafetyProtocol,
     ScientificReview,
     SkillModule,
@@ -126,6 +132,11 @@ from .commerce import (
     setting,
     setting_hint,
     test_zarinpal_connection,
+)
+from .scenario_engine import (
+    narrative_publish_errors,
+    narrative_to_contract,
+    validate_contract as validate_scenario_contract,
 )
 
 
@@ -276,6 +287,7 @@ def delete_child_records(child):
         ParentingAssessment,
         SkillProgress,
         ScenarioAttempt,
+        ScenarioNarrativeAttempt,
         FormResponse,
         ParentingStyleAssessment,
         ChildProfileSnapshot,
@@ -508,6 +520,7 @@ def scientific_review():
         "rule": PersonalizationRule.query.order_by(PersonalizationRule.id.desc()).all(),
         "protocol": SafetyProtocol.query.order_by(SafetyProtocol.id.desc()).all(),
         "form": DynamicForm.query.filter_by(status="review").order_by(DynamicForm.id.desc()).all(),
+        "scenario_narrative": ScenarioNarrative.query.filter_by(status="review").order_by(ScenarioNarrative.id.desc()).all(),
     }
     return render_template("admin/scientific_review.html", reviews=reviews, resources=resources)
 
@@ -668,7 +681,11 @@ def baumrind_instrument():
 @login_required
 @admin_required
 def personalization_rules():
-    topics = ScenarioTopic.query.order_by(ScenarioTopic.id).all()
+    topics = (
+        ScenarioTopic.query.outerjoin(ScenarioTopicProfile)
+        .order_by(ScenarioTopicProfile.sort_order, ScenarioTopic.id)
+        .all()
+    )
     topic_id = request.values.get("topic_id", type=int) or (topics[0].id if topics else None)
     selected_topic = db.session.get(ScenarioTopic, topic_id) if topic_id else None
     if request.method == "POST":
@@ -2514,13 +2531,242 @@ def admin_child_profile(child_id):
     )
 
 
+def save_narrative_from_form(narrative=None):
+    topic = db.session.get(ScenarioTopic, request.form.get("topic_id", type=int))
+    level = request.form.get("level", type=int)
+    if not topic or level not in range(1, 6):
+        return None, ["موضوع و سطح روایت معتبر نیست."]
+    title = request.form.get("title", "").strip()[:180]
+    context_text = request.form.get("context_text", "").strip()
+    age_min_value = request.form.get("child_age_min", type=int)
+    age_max_value = request.form.get("child_age_max", type=int)
+    age_min = min(25, max(0, age_min_value if age_min_value is not None else 6))
+    age_max = min(25, max(age_min, age_max_value if age_max_value is not None else 18))
+    if not narrative:
+        narrative = ScenarioNarrative(
+            topic_id=topic.id,
+            level=level,
+            title=title,
+            context_text=context_text,
+            created_by=current_user.id,
+        )
+        db.session.add(narrative)
+        db.session.flush()
+    elif narrative.status == "published":
+        narrative.version += 1
+        narrative.status = "review"
+        narrative.published_at = None
+    narrative.topic_id = topic.id
+    narrative.level = level
+    narrative.title = title
+    narrative.context_text = context_text
+    narrative.child_age_min = age_min
+    narrative.child_age_max = age_max
+    narrative.child_quote = request.form.get("child_quote", "").strip()[:700]
+    narrative.source_note = request.form.get("source_note", "").strip()[:700]
+    styles = ParentingStyleDefinition.query.filter_by(is_active=True).order_by(
+        ParentingStyleDefinition.sort_order
+    ).all()
+    existing = {item.style_id: item for item in narrative.reactions}
+    for style in styles:
+        reaction = existing.get(style.id)
+        if not reaction:
+            reaction = ScenarioReaction(narrative_id=narrative.id, style_id=style.id, reaction_text="")
+            db.session.add(reaction)
+        reaction.reaction_text = request.form.get(f"reaction_{style.code}", "").strip()
+        reaction.present_skill_ids_json = json.dumps(
+            request.form.getlist(f"present_skills_{style.code}", type=int), ensure_ascii=False
+        )
+        reaction.missing_skill_ids_json = json.dumps(
+            request.form.getlist(f"missing_skills_{style.code}", type=int), ensure_ascii=False
+        )
+        reaction.short_term_consequence = request.form.get(
+            f"short_term_{style.code}", ""
+        ).strip()
+        reaction.long_term_consequence = request.form.get(
+            f"long_term_{style.code}", ""
+        ).strip()
+        reaction.retry_guidance = request.form.get(f"retry_{style.code}", "").strip()
+        score_value = request.form.get(f"score_{style.code}", type=int)
+        reaction.scientific_score = min(100, max(0, score_value or 0))
+    errors = narrative_publish_errors(narrative)
+    if not title:
+        errors.insert(0, "عنوان روایت الزامی است.")
+    return narrative, errors
+
+
+def copy_narrative(source):
+    copy = ScenarioNarrative(
+        topic_id=source.topic_id,
+        level=source.level,
+        title=f"کپی {source.title}"[:180],
+        context_text=source.context_text,
+        child_age_min=source.child_age_min,
+        child_age_max=source.child_age_max,
+        child_quote=source.child_quote,
+        source_note=source.source_note,
+        status="draft",
+        copied_from_id=source.id,
+        created_by=current_user.id,
+    )
+    db.session.add(copy)
+    db.session.flush()
+    for item in source.reactions:
+        db.session.add(
+            ScenarioReaction(
+                narrative_id=copy.id,
+                style_id=item.style_id,
+                reaction_text=item.reaction_text,
+                present_skill_ids_json=item.present_skill_ids_json,
+                missing_skill_ids_json=item.missing_skill_ids_json,
+                short_term_consequence=item.short_term_consequence,
+                long_term_consequence=item.long_term_consequence,
+                retry_guidance=item.retry_guidance,
+                scientific_score=item.scientific_score,
+            )
+        )
+    return copy
+
+
 @bp.route("/tree", methods=["GET", "POST"])
 @login_required
 @admin_required
 def tree_builder():
     if request.method == "POST":
         action = request.form.get("action")
-        if action == "add_topic":
+        if action == "save_topic_meta":
+            topic = db.session.get(ScenarioTopic, request.form.get("topic_id", type=int))
+            if not topic:
+                abort(404)
+            profile = ScenarioTopicProfile.query.filter_by(topic_id=topic.id).first()
+            if not profile:
+                profile = ScenarioTopicProfile(topic_id=topic.id)
+                db.session.add(profile)
+            topic.title = request.form.get("title", "").strip()[:120]
+            topic.description = request.form.get("description", "").strip()[:500]
+            topic.icon = request.form.get("icon", "fa-comments").strip()[:60]
+            topic.is_published = request.form.get("status") == "active"
+            profile.domain = request.form.get("domain", "ارتباط خانوادگی").strip()[:100]
+            profile.target_skill_id = request.form.get("target_skill_id", type=int)
+            profile.status = request.form.get("status", "active") if request.form.get("status") in {"active", "inactive", "archived"} else "active"
+            profile.sort_order = request.form.get("sort_order", 0, type=int)
+            db.session.commit()
+            flash("مشخصات کاتالوگ موقعیت ذخیره شد.", "success")
+            return redirect(url_for("admin.tree_builder", topic_id=topic.id))
+        elif action == "save_narrative":
+            narrative_id = request.form.get("narrative_id", type=int)
+            narrative = db.session.get(ScenarioNarrative, narrative_id) if narrative_id else None
+            narrative, errors = save_narrative_from_form(narrative)
+            db.session.commit()
+            if errors:
+                flash("روایت ذخیره شد؛ برای انتشار هنوز مواردی باید کامل شود.", "warning")
+            else:
+                flash("روایت و چهار واکنش آن ذخیره شد.", "success")
+            return redirect(
+                url_for(
+                    "admin.tree_builder",
+                    topic_id=narrative.topic_id,
+                    level=narrative.level,
+                    narrative_id=narrative.id,
+                )
+            )
+        elif action == "copy_narrative":
+            source = db.get_or_404(ScenarioNarrative, request.form.get("narrative_id", type=int))
+            narrative = copy_narrative(source)
+            db.session.commit()
+            flash("یک نسخه پیش‌نویس مستقل از روایت ساخته شد.", "success")
+            return redirect(url_for("admin.tree_builder", topic_id=narrative.topic_id, level=narrative.level, narrative_id=narrative.id))
+        elif action == "request_narrative_review":
+            narrative = db.get_or_404(ScenarioNarrative, request.form.get("narrative_id", type=int))
+            errors = narrative_publish_errors(narrative)
+            if errors:
+                for error in errors[:8]:
+                    flash(error, "danger")
+            else:
+                narrative.status = "review"
+                fingerprint = ScientificReview.fingerprint(resource_snapshot("scenario_narrative", narrative))
+                review = ScientificReview.query.filter_by(
+                    resource_type="scenario_narrative",
+                    resource_id=narrative.id,
+                    resource_version=str(narrative.version),
+                    snapshot_hash=fingerprint,
+                ).first()
+                if not review:
+                    db.session.add(
+                        ScientificReview(
+                            resource_type="scenario_narrative",
+                            resource_id=narrative.id,
+                            resource_title=narrative.title,
+                            resource_version=str(narrative.version),
+                            snapshot_hash=fingerprint,
+                            requested_by=current_user.id,
+                        )
+                    )
+                db.session.commit()
+                flash("روایت برای ناظر علمی ارسال شد.", "success")
+            return redirect(url_for("admin.tree_builder", topic_id=narrative.topic_id, level=narrative.level, narrative_id=narrative.id))
+        elif action == "publish_narrative":
+            narrative = db.get_or_404(ScenarioNarrative, request.form.get("narrative_id", type=int))
+            errors = narrative_publish_errors(narrative)
+            if current_app.config["REQUIRE_SCIENTIFIC_APPROVAL"] and not approved_for_current_snapshot("scenario_narrative", narrative):
+                errors.append("انتشار production فقط پس از تأیید علمی همین نسخه مجاز است.")
+            if errors:
+                for error in errors[:10]:
+                    flash(error, "danger")
+            else:
+                narrative.status = "published"
+                narrative.published_at = utcnow()
+                db.session.commit()
+                flash("روایت منتشر شد و در تمرین والد قابل انتخاب است.", "success")
+            return redirect(url_for("admin.tree_builder", topic_id=narrative.topic_id, level=narrative.level, narrative_id=narrative.id))
+        elif action == "archive_narrative":
+            narrative = db.get_or_404(ScenarioNarrative, request.form.get("narrative_id", type=int))
+            narrative.status = "archived"
+            db.session.commit()
+            flash("روایت بایگانی شد؛ تاریخچه تلاش‌ها حفظ می‌شود.", "info")
+            return redirect(url_for("admin.tree_builder", topic_id=narrative.topic_id, level=narrative.level))
+        elif action == "import_narratives":
+            try:
+                payload = json.loads(request.form.get("scenario_json", ""))
+            except ValueError:
+                payload = None
+            topics = {item.slug: item for item in ScenarioTopic.query.all()}
+            rows, errors = validate_scenario_contract(payload, topics)
+            if errors:
+                for error in errors[:12]:
+                    flash(error, "danger")
+            else:
+                created = []
+                for row in rows:
+                    reactions = row.pop("reactions")
+                    topic = row.pop("topic")
+                    narrative = ScenarioNarrative(
+                        topic_id=topic.id,
+                        status="draft",
+                        created_by=current_user.id,
+                        **row,
+                    )
+                    db.session.add(narrative)
+                    db.session.flush()
+                    for reaction_row in reactions:
+                        style = reaction_row.pop("style")
+                        present = reaction_row.pop("present_skill_ids")
+                        missing = reaction_row.pop("missing_skill_ids")
+                        db.session.add(
+                            ScenarioReaction(
+                                narrative_id=narrative.id,
+                                style_id=style.id,
+                                present_skill_ids_json=json.dumps(present),
+                                missing_skill_ids_json=json.dumps(missing),
+                                **reaction_row,
+                            )
+                        )
+                    created.append(narrative)
+                db.session.commit()
+                flash(f"{len(created)} روایت به‌صورت پیش‌نویس وارد شد.", "success")
+                first = created[0]
+                return redirect(url_for("admin.tree_builder", topic_id=first.topic_id, level=first.level, narrative_id=first.id))
+        elif action == "add_topic":
             title = request.form.get("title", "").strip()
             slug = make_slug(request.form.get("slug"))
             if not title or ScenarioTopic.query.filter_by(slug=slug).first():
@@ -2534,7 +2780,16 @@ def tree_builder():
                 )
                 db.session.add(topic)
                 db.session.flush()
-                labels = ["خفیف", "قابل توجه", "جدی", "شدید", "بحرانی"]
+                db.session.add(
+                    ScenarioTopicProfile(
+                        topic_id=topic.id,
+                        domain=request.form.get("domain", "ارتباط خانوادگی").strip()[:100],
+                        target_skill_id=request.form.get("target_skill_id", type=int),
+                        status="active",
+                        sort_order=ScenarioTopic.query.count(),
+                    )
+                )
+                labels = ["سطحی", "آشکار", "پیش‌رونده", "قوی / خطرناک", "عمیق"]
                 for index, label in enumerate(labels, 1):
                     db.session.add(ScenarioLevel(topic_id=topic.id, level=index, label=label))
                 db.session.commit()
@@ -2573,7 +2828,11 @@ def tree_builder():
                 flash("عنوان گزینه و عنوان نتیجه الزامی است.", "danger")
             return redirect(url_for("admin.tree_builder", topic_id=level.topic_id, level=level.level))
 
-    topics = ScenarioTopic.query.order_by(ScenarioTopic.id).all()
+    topics = (
+        ScenarioTopic.query.outerjoin(ScenarioTopicProfile)
+        .order_by(ScenarioTopicProfile.sort_order, ScenarioTopic.id)
+        .all()
+    )
     topic_id = request.args.get("topic_id", type=int) or (topics[0].id if topics else None)
     level_number = min(5, max(1, request.args.get("level", 1, type=int)))
     selected_topic = db.session.get(ScenarioTopic, topic_id) if topic_id else None
@@ -2582,12 +2841,46 @@ def tree_builder():
         selected_level = ScenarioLevel.query.filter_by(
             topic_id=selected_topic.id, level=level_number
         ).first()
+    narratives = (
+        ScenarioNarrative.query.filter_by(topic_id=topic_id, level=level_number)
+        .order_by(ScenarioNarrative.updated_at.desc())
+        .all()
+        if topic_id
+        else []
+    )
+    narrative_id = request.args.get("narrative_id", type=int)
+    selected_narrative = db.session.get(ScenarioNarrative, narrative_id) if narrative_id else None
+    if selected_narrative and (
+        selected_narrative.topic_id != topic_id or selected_narrative.level != level_number
+    ):
+        selected_narrative = None
     return render_template(
         "admin/tree_builder.html",
         topics=topics,
         selected_topic=selected_topic,
         selected_level=selected_level,
         level_number=level_number,
+        crisis_levels=CrisisLevelDefinition.query.order_by(CrisisLevelDefinition.level).all(),
+        styles=ParentingStyleDefinition.query.filter_by(is_active=True).order_by(ParentingStyleDefinition.sort_order).all(),
+        skills=SkillModule.query.order_by(SkillModule.sort_order).all(),
+        narratives=narratives,
+        selected_narrative=selected_narrative,
+        narrative_errors=narrative_publish_errors(selected_narrative) if selected_narrative else [],
+    )
+
+
+@bp.route("/tree/narratives/<int:narrative_id>/export")
+@login_required
+@admin_required
+def export_scenario_narrative(narrative_id):
+    narrative = db.get_or_404(ScenarioNarrative, narrative_id)
+    body = json.dumps(narrative_to_contract(narrative), ensure_ascii=False, indent=2)
+    return Response(
+        body,
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="scenario-{narrative.id}-v{narrative.version}.json"'
+        },
     )
 
 

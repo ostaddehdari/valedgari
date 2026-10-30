@@ -20,6 +20,7 @@ from app.models import (
     CourseTopicMembership,
     CourseUnit,
     CourseUnitProgress,
+    CrisisLevelDefinition,
     ContractBeneficiary,
     DataDeletionRequest,
     DailyAction,
@@ -35,6 +36,7 @@ from app.models import (
     OrganizationAuditLog,
     OrganizationContract,
     ParentingAssessment,
+    ParentingStyleDefinition,
     ParentingStyleAssessment,
     PaymentAllocation,
     PaymentTransaction,
@@ -48,6 +50,11 @@ from app.models import (
     SafetyProtocol,
     ScientificReview,
     ScenarioTopic,
+    ScenarioLevel,
+    ScenarioNarrative,
+    ScenarioNarrativeAttempt,
+    ScenarioReaction,
+    ScenarioTopicProfile,
     SkillDomain,
     SkillModule,
     SkillProgress,
@@ -74,6 +81,14 @@ from app.form_engine import (
     normalize_scoring,
     score_answers,
     validate_ai_contract,
+)
+from app.scenario_engine import (
+    SCENARIO_CONTRACT,
+    choose_narrative,
+    narrative_publish_errors,
+    narrative_to_contract,
+    skill_score_summary,
+    validate_contract as validate_scenario_contract,
 )
 
 from .conftest import login
@@ -2295,4 +2310,225 @@ def test_admin_sales_csv_and_refund_flow(client, app):
     with app.app_context():
         assert CourseOrder.query.one().status == "refunded"
         assert CourseInvoice.query.one().status == "refunded"
+
+
+def create_scenario_narrative(app, topic_slug="anger", level=2, title="روایت تمرینی", status="published"):
+    with app.app_context():
+        topic = ScenarioTopic.query.filter_by(slug=topic_slug).one()
+        skills = SkillModule.query.order_by(SkillModule.id).all()
+        styles = ParentingStyleDefinition.query.order_by(ParentingStyleDefinition.sort_order).all()
+        narrative = ScenarioNarrative(
+            topic_id=topic.id,
+            level=level,
+            title=title,
+            context_text="پس از یک روز دشوار، نوجوان با صدای بلند مخالفت می‌کند و گفت‌وگو متوقف می‌شود.",
+            child_age_min=8,
+            child_age_max=18,
+            child_quote="الان نمی‌خواهم درباره‌اش حرف بزنم.",
+            status=status,
+            version=1,
+        )
+        db.session.add(narrative)
+        db.session.flush()
+        scores = {"authoritative": 100, "authoritarian": 25, "permissive": 45, "uninvolved": 10}
+        reactions = []
+        for index, style in enumerate(styles):
+            reaction = ScenarioReaction(
+                narrative_id=narrative.id,
+                style_id=style.id,
+                reaction_text=f"واکنش {style.title} نمونه؛ یک پاسخ کامل و قابل انتخاب برای والد.",
+                present_skill_ids_json=json.dumps([skills[index % len(skills)].id]),
+                missing_skill_ids_json=json.dumps([skills[(index + 1) % len(skills)].id]),
+                short_term_consequence=f"پیامد کوتاه‌مدت {style.title} ثبت می‌شود.",
+                long_term_consequence=f"پیامد بلندمدت {style.title} برای رابطه توضیح داده می‌شود.",
+                retry_guidance="پیش از تلاش بعدی مکث کنید و یک جمله کوتاه‌تر بسازید.",
+                scientific_score=scores[style.code],
+            )
+            db.session.add(reaction)
+            reactions.append(reaction)
+        db.session.commit()
+        return narrative.id, [item.id for item in reactions], topic.id
+
+
+def test_stage13_catalog_has_25_by_5_by_4_matrix(app):
+    with app.app_context():
+        topics = ScenarioTopic.query.all()
+        styles = ParentingStyleDefinition.query.filter_by(is_active=True).all()
+        assert len(topics) == 25
+        assert CrisisLevelDefinition.query.count() == 5
+        assert ScenarioLevel.query.count() == 25 * 5
+        assert ScenarioTopicProfile.query.count() == 25
+        assert len(styles) == 4
+        matrix = [
+            (topic.id, level, style.code)
+            for topic in topics
+            for level in range(1, 6)
+            for style in styles
+        ]
+        assert len(matrix) == 25 * 5 * 4
+        assert {item.title for item in CrisisLevelDefinition.query.all()} == {
+            "سطحی", "آشکار", "پیش‌رونده", "قوی / خطرناک", "عمیق"
+        }
+
+
+def test_narrative_publish_requires_all_four_complete_reactions(app):
+    with app.app_context():
+        topic = ScenarioTopic.query.filter_by(slug="anger").one()
+        style = ParentingStyleDefinition.query.filter_by(code="authoritative").one()
+        narrative = ScenarioNarrative(
+            topic_id=topic.id,
+            level=2,
+            title="روایت ناقص",
+            context_text="این متن زمینه به اندازه کافی بلند است اما واکنش‌های لازم را ندارد.",
+        )
+        db.session.add(narrative)
+        db.session.flush()
+        db.session.add(
+            ScenarioReaction(
+                narrative_id=narrative.id,
+                style_id=style.id,
+                reaction_text="واکنش مقتدرانه کامل اما تنها واکنش موجود است.",
+                short_term_consequence="تنش کوتاه‌مدت کاهش می‌یابد.",
+                long_term_consequence="اعتماد در طول زمان تقویت می‌شود.",
+                retry_guidance="جمله را کوتاه‌تر و روشن‌تر تکرار کنید.",
+                scientific_score=100,
+            )
+        )
+        db.session.flush()
+        errors = narrative_publish_errors(narrative)
+        assert any("هر چهار سبک" in error for error in errors)
+
+
+def test_admin_builds_and_publishes_four_style_narrative(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    with app.app_context():
+        topic_id = ScenarioTopic.query.filter_by(slug="screen-time").one().id
+        styles = ParentingStyleDefinition.query.all()
+        skill_ids = [item.id for item in SkillModule.query.limit(2).all()]
+    data = {
+        "action": "save_narrative",
+        "topic_id": str(topic_id),
+        "level": "3",
+        "title": "پایان زمان توافق‌شده موبایل",
+        "context_text": "زمان توافق‌شده موبایل تمام شده اما نوجوان بازی را ادامه می‌دهد و از توقف ناراحت است.",
+        "child_age_min": "10",
+        "child_age_max": "17",
+        "child_quote": "فقط پنج دقیقه دیگر وقت می‌خواهم.",
+    }
+    for style in styles:
+        data[f"reaction_{style.code}"] = f"واکنش کامل {style.title} برای این روایت و موقعیت واقعی خانواده."
+        data[f"present_skills_{style.code}"] = [str(skill_ids[0])]
+        data[f"missing_skills_{style.code}"] = [str(skill_ids[1])]
+        data[f"short_term_{style.code}"] = "پیامد کوتاه‌مدت روشن و قابل فهم است."
+        data[f"long_term_{style.code}"] = "پیامد بلندمدت این انتخاب بر رابطه توضیح داده می‌شود."
+        data[f"retry_{style.code}"] = "در تلاش بعدی جمله را کوتاه و بدون سرزنش بیان کنید."
+        data[f"score_{style.code}"] = "100" if style.code == "authoritative" else "30"
+    response = client.post("/admin/tree", data=data)
+    assert response.status_code == 302
+    with app.app_context():
+        narrative = ScenarioNarrative.query.filter_by(title=data["title"]).one()
+        assert len(narrative.reactions) == 4
+        assert narrative_publish_errors(narrative) == []
+        narrative_id = narrative.id
+    published = client.post(
+        "/admin/tree", data={"action": "publish_narrative", "narrative_id": narrative_id}
+    )
+    assert published.status_code == 302
+    with app.app_context():
+        assert db.session.get(ScenarioNarrative, narrative_id).status == "published"
+    page = client.get(f"/admin/tree?topic_id={topic_id}&level=3&narrative_id={narrative_id}")
+    assert page.status_code == 200
+    assert "چهار واکنش" in page.get_data(as_text=True)
+
+
+def test_parent_practice_hides_style_then_reveals_feedback(client, app):
+    narrative_id, reaction_ids, topic_id = create_scenario_narrative(app)
+    login(client)
+    client.post("/dashboard/children", data={"name": "سارا", "birth_year": "1392", "gender": "girl"})
+    page = client.get(f"/dashboard/scenario?topic_id={topic_id}&level=2")
+    body = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "تمرین بدون افشای سبک" in body
+    assert "واکنش مقتدرانه نمونه" in body
+    assert "این واکنش به سبک «مقتدرانه»" not in body
+    response = client.post(
+        "/dashboard/scenario",
+        data={
+            "action": "narrative_attempt",
+            "topic_id": topic_id,
+            "level": 2,
+            "narrative_id": narrative_id,
+            "reaction_id": reaction_ids[0],
+        },
+        follow_redirects=True,
+    )
+    result = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "تحلیل انتخاب شما" in result
+    with app.app_context():
+        attempt = ScenarioNarrativeAttempt.query.one()
+        assert attempt.score in {100, 25, 45, 10}
+        assert len(attempt.option_order) == 4
+
+
+def test_narrative_selection_avoids_repeat_until_pool_exhausted(client, app):
+    first_id, first_reactions, topic_id = create_scenario_narrative(app, title="روایت اول")
+    second_id, _second_reactions, _ = create_scenario_narrative(app, title="روایت دوم")
+    login(client)
+    client.post("/dashboard/children", data={"name": "سارا", "birth_year": "1392", "gender": "girl"})
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = parent.children[0]
+        selected, order = choose_narrative(parent.id, child, topic_id, 2)
+        db.session.add(
+            ScenarioNarrativeAttempt(
+                user_id=parent.id,
+                child_id=child.id,
+                narrative_id=selected.id,
+                selected_reaction_id=order[0],
+                option_order_json=json.dumps(order),
+                score=20,
+            )
+        )
+        db.session.commit()
+        next_item, next_order = choose_narrative(parent.id, child, topic_id, 2)
+        assert {selected.id, next_item.id} == {first_id, second_id}
+        assert len(next_order) == 4
+
+
+def test_scenario_json_import_export_is_draft_only(client, app):
+    narrative_id, _reactions, _topic_id = create_scenario_narrative(app)
+    with app.app_context():
+        payload = narrative_to_contract(db.session.get(ScenarioNarrative, narrative_id))
+        rows, errors = validate_scenario_contract(
+            payload, {item.slug: item for item in ScenarioTopic.query.all()}
+        )
+        assert errors == []
+        assert len(rows) == 1
+    login(client, mobile="09120000001", password="AdminPass123")
+    exported = client.get(f"/admin/tree/narratives/{narrative_id}/export")
+    assert exported.status_code == 200
+    assert exported.get_json()["contract"] == SCENARIO_CONTRACT
+    imported = client.post(
+        "/admin/tree",
+        data={"action": "import_narratives", "scenario_json": json.dumps(payload, ensure_ascii=False)},
+    )
+    assert imported.status_code == 302
+    with app.app_context():
+        assert ScenarioNarrative.query.count() == 2
+        assert ScenarioNarrative.query.filter_by(status="draft").count() == 1
+
+
+def test_production_publish_needs_same_snapshot_approval(client, app):
+    narrative_id, _reactions, _topic_id = create_scenario_narrative(app, status="review")
+    app.config["REQUIRE_SCIENTIFIC_APPROVAL"] = True
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/tree",
+        data={"action": "publish_narrative", "narrative_id": narrative_id},
+        follow_redirects=True,
+    )
+    assert "پس از تأیید علمی همین نسخه" in response.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(ScenarioNarrative, narrative_id).status == "review"
 

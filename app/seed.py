@@ -8,11 +8,14 @@ from .models import (
     CourseSkillMembership,
     CourseTopicMembership,
     CourseUnit,
+    CrisisLevelDefinition,
     MicroLesson,
+    ParentingStyleDefinition,
     PersonalizationRule,
     ProfileDefinition,
     ScenarioLevel,
     ScenarioTopic,
+    ScenarioTopicProfile,
     SafetyProtocol,
     SkillDomain,
     SkillDomainMembership,
@@ -31,20 +34,57 @@ SKILLS = [
 
 
 TOPICS = [
-    ("screen-time", "استفاده افراطی از موبایل", "مدیریت زمان صفحه‌نمایش بدون جنگ قدرت", "fa-mobile-screen-button"),
-    ("school-drop", "افت تحصیلی", "گفت‌وگو درباره عملکرد مدرسه بدون برچسب‌زنی", "fa-graduation-cap"),
-    ("anger", "خشم و پرخاشگری", "کاهش تنش و حفظ مرزهای ایمن", "fa-fire"),
-    ("lying", "دروغ‌گویی", "بازسازی اعتماد و یافتن علت پنهان رفتار", "fa-mask-face"),
-    ("friends", "تعارض با دوستان", "حمایت از نوجوان بدون تصاحب مسئله", "fa-user-group"),
+    ("screen-time", "استفاده افراطی از موبایل", "مدیریت زمان صفحه‌نمایش بدون جنگ قدرت", "fa-mobile-screen-button", "سبک زندگی دیجیتال", "boundaries"),
+    ("school-drop", "افت تحصیلی", "گفت‌وگو درباره عملکرد مدرسه بدون برچسب‌زنی", "fa-graduation-cap", "تحصیل", "motivation"),
+    ("anger", "خشم و پرخاشگری", "کاهش تنش و حفظ مرزهای ایمن", "fa-fire", "هیجان", "emotion-regulation"),
+    ("lying", "دروغ‌گویی", "بازسازی اعتماد و یافتن علت پنهان رفتار", "fa-mask-face", "اعتماد", "empathy"),
+    ("friends", "تعارض با دوستان", "حمایت از نوجوان بدون تصاحب مسئله", "fa-user-group", "روابط همسالان", "active-listening"),
+    ("sleep-routine", "بی‌نظمی خواب", "ساخت روال خواب با مشارکت نوجوان", "fa-moon", "سبک زندگی", "boundaries"),
+    ("homework-resistance", "مقاومت در برابر تکلیف", "شناخت مانع شروع و قدم کوچک", "fa-book-open", "تحصیل", "motivation"),
+    ("sibling-conflict", "تعارض خواهر و برادر", "داوری نکردن و آموزش حل تعارض", "fa-people-arrows", "روابط خانوادگی", "problem-solving"),
+    ("disrespect", "گفتار بی‌احترام", "حفظ شأن دوطرف و مرز گفت‌وگو", "fa-comment-slash", "ارتباط", "boundaries"),
+    ("household-rules", "مقاومت در برابر قوانین خانه", "بازنگری قانون و پیامد مرتبط", "fa-house-lock", "مرزبندی", "boundaries"),
+    ("spending", "خرج‌کردن و پول توجیبی", "آموزش انتخاب و پیامد مالی", "fa-wallet", "مسئولیت", "problem-solving"),
+    ("eating", "تعارض درباره غذا", "پرهیز از شرم و ساخت انتخاب سالم", "fa-utensils", "سلامت روزمره", "empathy"),
+    ("isolation", "کناره‌گیری و انزوا", "حفظ حضور امن بدون فشار", "fa-door-closed", "پیوند عاطفی", "active-listening"),
+    ("anxiety", "نگرانی و اضطراب", "همراهی با هیجان و قدم قابل کنترل", "fa-cloud", "هیجان", "empathy"),
+    ("peer-pressure", "فشار همسالان", "تمرین نه‌گفتن و تصمیم مستقل", "fa-users-rays", "روابط همسالان", "problem-solving"),
+    ("bullying", "قلدری و آزار همسالان", "ایمنی، ثبت شواهد و حمایت بزرگسال", "fa-shield", "ایمنی", "problem-solving"),
+    ("romantic-relations", "روابط عاطفی نوجوان", "گفت‌وگوی محترمانه درباره مرز و امنیت", "fa-heart", "روابط", "active-listening"),
+    ("online-safety", "ایمنی در فضای مجازی", "حریم خصوصی و واکنش به تهدید آنلاین", "fa-user-shield", "ایمنی دیجیتال", "boundaries"),
+    ("substance-risk", "خطر مصرف مواد", "اولویت ایمنی، گفت‌وگو و ارجاع", "fa-triangle-exclamation", "ریسک", "emotion-regulation"),
+    ("self-harm-signals", "نشانه‌های آسیب به خود", "توقف آموزش عادی و فعال‌سازی حمایت تخصصی", "fa-life-ring", "ریسک", "emotion-regulation"),
+    ("truancy", "غیبت از مدرسه", "یافتن علت و برنامه بازگشت", "fa-school-circle-xmark", "تحصیل", "problem-solving"),
+    ("stealing", "برداشتن مال دیگران", "ترمیم، مسئولیت و بررسی نیاز زمینه‌ای", "fa-hand", "اعتماد", "problem-solving"),
+    ("responsibility", "بی‌مسئولیتی در کارهای شخصی", "تقسیم کار و پیگیری بدون کنترل افراطی", "fa-list-check", "مسئولیت", "motivation"),
+    ("body-image", "نگرانی از ظاهر و بدن", "گفت‌وگوی بدون قضاوت و شرم", "fa-person", "هویت", "empathy"),
+    ("career-choice", "تعارض بر سر آینده و رشته", "شناخت ارزش‌ها و تصمیم مشارکتی", "fa-compass", "آینده", "active-listening"),
 ]
 
 
 LEVELS = [
-    (1, "خفیف"),
-    (2, "قابل توجه"),
-    (3, "جدی"),
-    (4, "شدید"),
-    (5, "بحرانی"),
+    (1, "سطحی"),
+    (2, "آشکار"),
+    (3, "پیش‌رونده"),
+    (4, "قوی / خطرناک"),
+    (5, "عمیق"),
+]
+
+
+CRISIS_LEVELS = [
+    (1, "surface", "سطحی", "#4f9d7d", "رفتار پراکنده و کم‌اثر که با گفت‌وگوی کوتاه قابل مدیریت است.", ["تکرار کم", "تنش پایین", "اختلال محدود"]),
+    (2, "visible", "آشکار", "#7a9b43", "الگوی رفتاری قابل مشاهده که به توافق روشن و پیگیری نیاز دارد.", ["تکرار قابل مشاهده", "اعتراض کلامی", "اثر کوتاه بر روال"]),
+    (3, "progressive", "پیش‌رونده", "#d09a32", "الگو در حال تثبیت است و بر چند بخش زندگی اثر می‌گذارد.", ["افزایش تکرار", "افت همکاری", "اثر بر خواب یا مدرسه"]),
+    (4, "strong-risky", "قوی / خطرناک", "#d66a3c", "تنش یا رفتار شدید است و ارزیابی ایمنی باید مقدم باشد.", ["تهدید یا پرخاش", "اختلال جدی", "نیاز به حمایت بزرگسال"]),
+    (5, "deep", "عمیق", "#a93f55", "مسئله عمیق، مزمن یا همراه با خطر است و آموزش عمومی کافی نیست.", ["خطر آسیب", "گسست شدید عملکرد", "نیاز به ارجاع تخصصی"]),
+]
+
+
+PARENTING_STYLES = [
+    ("authoritative", "مقتدرانه", "گرمی رابطه همراه با مرز روشن و مشارکت متناسب با سن.", ["همدلی", "مرز روشن", "گفت‌وگو", "پیامد مرتبط"], "#176254"),
+    ("authoritarian", "مستبدانه", "کنترل و اطاعت بالا با گفت‌وگو و انعطاف کم.", ["دستور", "تنبیه", "کنترل بالا", "گفت‌وگوی کم"], "#a44848"),
+    ("permissive", "سهل‌گیرانه", "گرمی بالا با مرز و پیگیری ناکافی.", ["پذیرش", "مرز کم", "پیگیری کم", "اجتناب از تعارض"], "#c48a2b"),
+    ("uninvolved", "غافلانه", "درگیری عاطفی و نظارت اندک یا پاسخ‌گویی نامنظم.", ["فاصله", "نظارت کم", "پاسخ‌گویی کم", "عدم پیگیری"], "#697a76"),
 ]
 
 
@@ -218,8 +258,9 @@ def seed_content():
                 )
             )
 
-    if ScenarioTopic.query.count() == 0:
-        for slug, title, description, icon in TOPICS:
+    for slug, title, description, icon, _domain, _skill_slug in TOPICS:
+        topic = ScenarioTopic.query.filter_by(slug=slug).first()
+        if not topic:
             topic = ScenarioTopic(slug=slug, title=title, description=description, icon=icon)
             db.session.add(topic)
             db.session.flush()
@@ -234,7 +275,77 @@ def seed_content():
                         consequence="احتمال مقاومت، پنهان‌کاری یا فاصله عاطفی بیشتر می‌شود. این پیامد قطعی نیست و به زمینه خانواده وابسته است.",
                     )
                 )
-        db.session.flush()
+        else:
+            topic.title = title
+            topic.description = description
+            topic.icon = icon
+            existing_levels = {item.level: item for item in topic.levels}
+            for level, label in LEVELS:
+                if level in existing_levels:
+                    existing_levels[level].label = label
+                else:
+                    db.session.add(
+                        ScenarioLevel(
+                            topic_id=topic.id,
+                            level=level,
+                            label=label,
+                            description=f"این موقعیت در سطح {label} قرار دارد؛ ابتدا شدت هیجان و ایمنی را بسنجید.",
+                        )
+                    )
+    db.session.flush()
+
+    if CrisisLevelDefinition.query.count() == 0:
+        for order, item in enumerate(CRISIS_LEVELS, 1):
+            level, code, title, color, description, markers = item
+            db.session.add(
+                CrisisLevelDefinition(
+                    level=level,
+                    code=code,
+                    title=title,
+                    color=color,
+                    description=description,
+                    behavioral_markers_json=json.dumps(markers, ensure_ascii=False),
+                    sort_order=order,
+                )
+            )
+
+    if ParentingStyleDefinition.query.count() == 0:
+        for order, item in enumerate(PARENTING_STYLES, 1):
+            code, title, description, traits, color = item
+            db.session.add(
+                ParentingStyleDefinition(
+                    code=code,
+                    title=title,
+                    description=description,
+                    traits_json=json.dumps(traits, ensure_ascii=False),
+                    color=color,
+                    sort_order=order,
+                )
+            )
+    db.session.flush()
+
+    topics = {item.slug: item for item in ScenarioTopic.query.all()}
+    skills = {item.slug: item for item in SkillModule.query.all()}
+    for order, item in enumerate(TOPICS, 1):
+        slug, _title, _description, _icon, domain, skill_slug = item
+        topic = topics.get(slug)
+        if topic:
+            profile = ScenarioTopicProfile.query.filter_by(topic_id=topic.id).first()
+            if not profile:
+                db.session.add(
+                    ScenarioTopicProfile(
+                        topic_id=topic.id,
+                        domain=domain,
+                        target_skill_id=skills.get(skill_slug).id if skills.get(skill_slug) else None,
+                        status="active",
+                        sort_order=order,
+                    )
+                )
+            else:
+                profile.domain = domain
+                profile.target_skill_id = skills.get(skill_slug).id if skills.get(skill_slug) else None
+                profile.sort_order = order
+    db.session.flush()
 
     if SkillDomain.query.count() == 0:
         db.session.flush()
