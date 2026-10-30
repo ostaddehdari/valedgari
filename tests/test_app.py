@@ -887,3 +887,47 @@ def test_anonymous_project_report_suppresses_small_groups(client, app):
     assert "09120000002" not in text
     assert "والد آزمون" not in text
 
+
+def test_parent_dashboard_uses_role_aware_sidebar_and_user_header(client):
+    login(client)
+    response = client.get("/dashboard/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="appSidebar"' in html
+    assert 'data-sidebar-toggle' in html
+    assert "داشبورد من" in html
+    assert "فرزندان من" in html
+    assert "/auth/profile" in html
+    assert "خروج امن" in html
+
+
+def test_admin_dashboard_sidebar_marks_active_page(client):
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.get("/admin/projects")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "پروژه‌های سازمانی" in html
+    assert "کاربران" in html
+    assert 'aria-current="page"' in html
+    assert "داشبورد من" not in html
+
+
+def test_user_can_open_and_update_own_profile(client, app):
+    login(client)
+    assert client.get("/auth/profile").status_code == 200
+    response = client.post(
+        "/auth/profile",
+        data={"full_name": "والد به‌روزشده"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "پروفایل شما به‌روزرسانی شد" in response.get_data(as_text=True)
+    with app.app_context():
+        assert User.query.filter_by(mobile="09120000002").one().full_name == "والد به‌روزشده"
+
+
+def test_dashboard_css_contains_scrollable_modal_contract(client):
+    css = client.get("/static/css/app.css").get_data(as_text=True)
+    assert ".modal-dialog-scrollable .modal-content>form>.modal-body" in css
+    assert "overflow-y:auto" in css
+

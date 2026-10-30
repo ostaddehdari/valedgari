@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}پروفایل من | والدیار{% endblock %}
+{% block body_class %}profile-page{% endblock %}
+{% block content %}
+<section class="page-header dark profile-header"><div class="container"><span class="eyebrow light">حساب کاربری</span><h1>پروفایل من</h1><p>اطلاعات اصلی حساب و نقش شما در سامانه.</p></div></section>
+<div class="container section-pad-sm"><div class="row g-4 justify-content-center"><div class="col-xl-8">
+  <div class="profile-summary-card"><span class="profile-avatar-large">{{ current_user.full_name[:1] }}</span><div><small>حساب فعال</small><h2>{{ current_user.full_name }}</h2><p>{{ current_user.mobile }} · {% if current_user.is_admin %}مدیر سامانه{% elif current_user.is_reviewer %}ناظر علمی{% else %}والد{% endif %}</p></div></div>
+  <div class="panel-card mt-4"><div class="panel-heading"><div><span class="eyebrow">اطلاعات پایه</span><h2>ویرایش مشخصات</h2></div><span class="profile-status"><i class="fa-solid fa-circle-check"></i> فعال</span></div>
+    <form method="post" class="row g-3"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="col-md-7"><label class="form-label" for="full_name">نام و نام خانوادگی</label><input class="form-control" id="full_name" name="full_name" value="{{ current_user.full_name }}" required minlength="3" autocomplete="name"></div><div class="col-md-5"><label class="form-label" for="mobile">شماره موبایل</label><input class="form-control" id="mobile" value="{{ current_user.mobile }}" disabled inputmode="numeric"><div class="form-text">تغییر شماره موبایل فعلاً فقط از طریق پشتیبانی انجام می‌شود.</div></div><div class="col-12"><button class="btn btn-primary-custom" type="submit"><i class="fa-solid fa-floppy-disk ms-2"></i>ذخیره تغییرات</button></div></form>
+  </div>
+</div></div></div>
+{% endblock %}

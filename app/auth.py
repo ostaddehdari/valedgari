@@ -1,7 +1,7 @@
 from urllib.parse import urljoin, urlparse
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
-from flask_login import current_user, login_user, logout_user
+from flask_login import current_user, login_required, login_user, logout_user
 
 from .extensions import db
 from .models import ConsentRecord, User
@@ -95,4 +95,19 @@ def logout():
     logout_user()
     flash("با موفقیت از حساب خارج شدید.", "info")
     return redirect(url_for("main.index"))
+
+
+@bp.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        if len(full_name) < 3:
+            flash("نام و نام خانوادگی را کامل وارد کنید.", "danger")
+        else:
+            current_user.full_name = full_name
+            db.session.commit()
+            flash("پروفایل شما به‌روزرسانی شد.", "success")
+            return redirect(url_for("auth.profile"))
+    return render_template("auth/profile.html")
 

@@ -13,91 +13,52 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   {% block head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %} {{ 'dashboard-shell-page' if current_user.is_authenticated else 'public-shell-page' }}">
   <a class="skip-link" href="#main-content">رفتن به محتوای اصلی</a>
-  <nav class="navbar navbar-expand-lg navbar-light site-nav sticky-top" aria-label="ناوبری اصلی">
-    <div class="container">
-      <a class="navbar-brand brand" href="{{ url_for('main.index') }}" aria-label="والدیار، صفحه نخست">
-        <span class="brand-mark"><i class="fa-solid fa-seedling"></i></span>
-        <span>والدیار<small>همراه رشد خانواده</small></span>
-      </a>
-      <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="نمایش منو">
-        <i class="fa-solid fa-bars"></i>
-      </button>
-      <div class="collapse navbar-collapse" id="mainNav">
-        {% if current_user.is_authenticated %}
-          <ul class="navbar-nav me-auto align-items-lg-center gap-lg-2">
-            {% if current_user.is_admin %}
-              <li><a class="nav-link" href="{{ url_for('admin.dashboard') }}">داشبورد مدیریت</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.projects') }}">پروژه‌های سازمانی</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.baumrind_instrument') }}">ابزار بامریند</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.personalization_rules') }}">شخصی‌سازی</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.learning_path') }}">مسیر آموزشی</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.assistant_control') }}">کنترل دستیار</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.scientific_review') }}">تأیید علمی</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.operations') }}">اثربخشی و عملیات</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.tree_builder') }}">درخت مسیر</a></li>
-              <li><a class="nav-link" href="{{ url_for('admin.form_builder') }}">فرم‌ساز</a></li>
-            {% elif current_user.is_reviewer %}
-              <li><a class="nav-link" href="{{ url_for('admin.scientific_review') }}">کارتابل ناظر علمی</a></li>
-            {% else %}
-              <li><a class="nav-link" href="{{ url_for('parent.dashboard') }}">داشبورد من</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.projects') }}">حمایت سازمانی</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.child_profile') }}">نمای فرزند</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.parenting_style') }}">سبک والدگری</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.journey') }}">مسیر من</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.assistant') }}">همراه هوشمند</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.recommendations') }}">برنامه‌ها</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.skills') }}">مهارت‌ها</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.scenario') }}">موقعیت‌ها</a></li>
-              <li><a class="nav-link" href="{{ url_for('parent.privacy_center') }}">حریم خصوصی</a></li>
-            {% endif %}
-            <li class="nav-item dropdown">
-              <a class="nav-link dropdown-toggle user-chip" href="#" data-bs-toggle="dropdown"><i class="fa-regular fa-circle-user"></i> {{ current_user.full_name }}</a>
-              <ul class="dropdown-menu dropdown-menu-end border-0 shadow-sm">
-                <li>
-                  <form action="{{ url_for('auth.logout') }}" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="dropdown-item text-danger" type="submit"><i class="fa-solid fa-arrow-right-from-bracket ms-2"></i>خروج امن</button>
-                  </form>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        {% else %}
-          <ul class="navbar-nav me-auto align-items-lg-center gap-lg-2">
-            <li><a class="nav-link" href="{{ url_for('main.index') }}#solution">راهکار</a></li>
-            <li><a class="nav-link" href="{{ url_for('main.index') }}#journey">مسیر رشد</a></li>
-            <li><a class="nav-link" href="{{ url_for('main.index') }}#situations">موقعیت‌های واقعی</a></li>
-            <li><a class="btn btn-ghost" href="{{ url_for('auth.login') }}">ورود</a></li>
-            <li><a class="btn btn-primary-custom" href="{{ url_for('auth.register') }}">ساخت حساب رایگان</a></li>
-          </ul>
-        {% endif %}
+  {% set page_content %}{% block content %}{% endblock %}{% endset %}
+  {% if current_user.is_authenticated %}
+    <div class="dashboard-shell" data-dashboard-shell>
+      {% include "_dashboard_sidebar.html" %}
+      <button class="sidebar-overlay" type="button" data-sidebar-close aria-label="بستن منوی کناری"></button>
+      <div class="dashboard-shell-main">
+        <header class="dashboard-topbar">
+          <div class="dashboard-topbar-context">
+            <button class="dashboard-menu-button" type="button" data-sidebar-toggle aria-controls="appSidebar" aria-expanded="false" aria-label="بازکردن منوی داشبورد"><i class="fa-solid fa-bars"></i></button>
+            <div><small>{% if current_user.is_admin %}پنل مدیریت{% elif current_user.is_reviewer %}پنل نظارت علمی{% else %}پنل خانواده{% endif %}</small><strong>والدیار</strong></div>
+          </div>
+          <div class="dashboard-user dropdown">
+            <button class="dashboard-user-button dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="منوی حساب {{ current_user.full_name }}"><span class="topbar-avatar">{{ current_user.full_name[:1] }}</span><span class="topbar-user-copy"><strong>{{ current_user.full_name }}</strong><small>{% if current_user.is_admin %}مدیر سامانه{% elif current_user.is_reviewer %}ناظر علمی{% else %}والد{% endif %}</small></span></button>
+            <ul class="dropdown-menu dropdown-menu-end dashboard-user-menu border-0 shadow-sm">
+              <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}"><i class="fa-regular fa-circle-user ms-2"></i>پروفایل من</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><form action="{{ url_for('auth.logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="dropdown-item text-danger" type="submit"><i class="fa-solid fa-arrow-right-from-bracket ms-2"></i>خروج امن</button></form></li>
+            </ul>
+          </div>
+        </header>
+        <div class="flash-stack dashboard-flash-stack" aria-live="polite">
+          {% for category, message in get_flashed_messages(with_categories=true) %}<div class="alert alert-{{ category }} alert-dismissible fade show animate__animated animate__fadeInDown" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="بستن"></button></div>{% endfor %}
+        </div>
+        <main id="main-content" class="dashboard-main-content">{{ page_content }}</main>
+        <footer class="dashboard-footer"><span>والدیار · همراه رشد خانواده</span><small>این سامانه جایگزین خدمات فوری پزشکی یا روان‌شناختی نیست.</small></footer>
       </div>
     </div>
-  </nav>
-
-  <div class="flash-stack container" aria-live="polite">
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-      <div class="alert alert-{{ category }} alert-dismissible fade show animate__animated animate__fadeInDown" role="alert">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="بستن"></button>
+  {% else %}
+    <nav class="navbar navbar-expand-lg navbar-light site-nav sticky-top" aria-label="ناوبری اصلی">
+      <div class="container">
+        <a class="navbar-brand brand" href="{{ url_for('main.index') }}" aria-label="والدیار، صفحه نخست"><span class="brand-mark"><i class="fa-solid fa-seedling"></i></span><span>والدیار<small>همراه رشد خانواده</small></span></a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="نمایش منو"><i class="fa-solid fa-bars"></i></button>
+        <div class="collapse navbar-collapse" id="mainNav"><ul class="navbar-nav me-auto align-items-lg-center gap-lg-2"><li><a class="nav-link" href="{{ url_for('main.index') }}#solution">راهکار</a></li><li><a class="nav-link" href="{{ url_for('main.index') }}#journey">مسیر رشد</a></li><li><a class="nav-link" href="{{ url_for('main.index') }}#situations">موقعیت‌های واقعی</a></li><li><a class="btn btn-ghost" href="{{ url_for('auth.login') }}">ورود</a></li><li><a class="btn btn-primary-custom" href="{{ url_for('auth.register') }}">ساخت حساب رایگان</a></li></ul></div>
       </div>
-    {% endfor %}
-  </div>
-
-  <main id="main-content">{% block content %}{% endblock %}</main>
-
-  <footer class="site-footer">
-    <div class="container d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
-      <div><strong>والدیار</strong><span class="text-muted"> · همراه تصمیم‌های آرام‌تر و رابطه‌های امن‌تر</span></div>
-      <div class="small text-muted">این سامانه جایگزین خدمات فوری پزشکی یا روان‌شناختی نیست.</div>
+    </nav>
+    <div class="flash-stack container" aria-live="polite">
+      {% for category, message in get_flashed_messages(with_categories=true) %}<div class="alert alert-{{ category }} alert-dismissible fade show animate__animated animate__fadeInDown" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="بستن"></button></div>{% endfor %}
     </div>
-  </footer>
+    <main id="main-content">{{ page_content }}</main>
+    <footer class="site-footer"><div class="container d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center"><div><strong>والدیار</strong><span class="text-muted"> · همراه تصمیم‌های آرام‌تر و رابطه‌های امن‌تر</span></div><div class="small text-muted">این سامانه جایگزین خدمات فوری پزشکی یا روان‌شناختی نیست.</div></div></footer>
+  {% endif %}
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
-

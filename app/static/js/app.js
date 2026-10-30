@@ -7,6 +7,73 @@
   syncNav();
   window.addEventListener("scroll", syncNav, { passive: true });
 
+  const dashboardShell = document.querySelector("[data-dashboard-shell]");
+  if (dashboardShell) {
+    const body = document.body;
+    const sidebar = document.getElementById("appSidebar");
+    const toggleButton = document.querySelector("[data-sidebar-toggle]");
+    const collapseButton = document.querySelector("[data-sidebar-collapse]");
+    const closeControls = document.querySelectorAll("[data-sidebar-close]");
+    const mobileViewport = window.matchMedia("(max-width: 991px)");
+    const storageKey = "valedgari.sidebar.collapsed";
+
+    const readCollapsedPreference = () => {
+      try { return window.localStorage.getItem(storageKey) === "true"; } catch (_) { return false; }
+    };
+    const saveCollapsedPreference = (value) => {
+      try { window.localStorage.setItem(storageKey, String(value)); } catch (_) { /* storage may be blocked */ }
+    };
+    const syncSidebarState = () => {
+      const mobileOpen = body.classList.contains("sidebar-mobile-open");
+      const collapsed = body.classList.contains("sidebar-collapsed");
+      if (toggleButton) toggleButton.setAttribute("aria-expanded", String(mobileViewport.matches ? mobileOpen : !collapsed));
+      if (collapseButton) {
+        collapseButton.setAttribute("aria-expanded", String(!collapsed));
+        collapseButton.setAttribute("aria-label", collapsed ? "بازکردن سایدبار" : "جمع‌کردن سایدبار");
+      }
+      if (sidebar) sidebar.setAttribute("aria-hidden", String(mobileViewport.matches && !mobileOpen));
+    };
+    const closeMobileSidebar = () => {
+      body.classList.remove("sidebar-mobile-open");
+      syncSidebarState();
+    };
+    const toggleDesktopSidebar = () => {
+      const collapsed = body.classList.toggle("sidebar-collapsed");
+      saveCollapsedPreference(collapsed);
+      syncSidebarState();
+    };
+
+    if (!mobileViewport.matches && readCollapsedPreference()) body.classList.add("sidebar-collapsed");
+    if (toggleButton) toggleButton.addEventListener("click", () => {
+      if (mobileViewport.matches) {
+        body.classList.toggle("sidebar-mobile-open");
+        syncSidebarState();
+      } else {
+        toggleDesktopSidebar();
+      }
+    });
+    if (collapseButton) collapseButton.addEventListener("click", toggleDesktopSidebar);
+    closeControls.forEach((control) => control.addEventListener("click", closeMobileSidebar));
+    document.querySelectorAll(".sidebar-link").forEach((link) => link.addEventListener("click", () => {
+      if (mobileViewport.matches) closeMobileSidebar();
+    }));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && body.classList.contains("sidebar-mobile-open")) {
+        closeMobileSidebar();
+        if (toggleButton) toggleButton.focus();
+      }
+    });
+    const handleViewportChange = () => {
+      body.classList.remove("sidebar-mobile-open");
+      if (mobileViewport.matches) body.classList.remove("sidebar-collapsed");
+      else body.classList.toggle("sidebar-collapsed", readCollapsedPreference());
+      syncSidebarState();
+    };
+    if (mobileViewport.addEventListener) mobileViewport.addEventListener("change", handleViewportChange);
+    else mobileViewport.addListener(handleViewportChange);
+    syncSidebarState();
+  }
+
   const animated = document.querySelectorAll("[data-animate]");
   if (reduceMotion || !("IntersectionObserver" in window)) {
     animated.forEach((item) => item.classList.add("animate__animated", item.dataset.animate || "animate__fadeInUp"));
