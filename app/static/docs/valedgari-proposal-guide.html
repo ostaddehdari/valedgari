@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>راهنمای مصور انطباق پروپوزال با سامانه والدیار</title>
+  <meta name="description" content="نقشه مصور قابلیت‌های والدیار و ارتباط هر بخش سایت با نیازمندی‌های پروپوزال">
+  <style>
+    @font-face{font-family:Vazirmatn;src:local("Vazirmatn"),local("Vazir");font-display:swap}
+    :root{
+      --ink:#17332e;--muted:#657d77;--paper:#f6f8f5;--white:#fff;
+      --teal:#0b7b6c;--teal-2:#0e9b87;--mint:#dff4ed;--mint-2:#eef9f5;
+      --coral:#ec765f;--coral-soft:#fff0ec;--gold:#d5a43a;--gold-soft:#fff6dc;
+      --blue:#4b77be;--blue-soft:#edf3ff;--purple:#7b64b4;--purple-soft:#f3efff;
+      --danger:#c95050;--danger-soft:#fff0f0;--line:#dce6e1;--shadow:0 18px 50px rgba(23,51,46,.10);
+      --radius:24px;--radius-sm:16px
+    }
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:88px}
+    body{margin:0;background:var(--paper);color:var(--ink);font-family:Vazirmatn,Tahoma,Arial,sans-serif;line-height:1.85}
+    a{color:inherit;text-decoration:none}button,input{font:inherit}svg{display:block;max-width:100%}
+    .container{width:min(1220px,calc(100% - 36px));margin-inline:auto}
+    .topbar{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(16px);border-bottom:1px solid rgba(220,230,225,.9)}
+    .topbar-inner{height:72px;display:flex;align-items:center;gap:18px}
+    .brand{display:flex;align-items:center;gap:10px;white-space:nowrap}.brand-mark{width:40px;height:40px;border-radius:14px;background:linear-gradient(135deg,var(--teal),var(--teal-2));color:#fff;display:grid;place-items:center;font-weight:900;box-shadow:0 8px 18px rgba(11,123,108,.22)}
+    .brand strong{display:block;font-size:1rem}.brand small{display:block;color:var(--muted);font-size:.72rem}
+    .search{position:relative;flex:1;max-width:520px;margin-inline:auto}.search input{width:100%;height:44px;border:1px solid var(--line);background:#f8fbf9;border-radius:14px;padding:0 44px 0 14px;color:var(--ink);outline:none}.search input:focus{border-color:var(--teal-2);box-shadow:0 0 0 4px rgba(14,155,135,.1)}.search span{position:absolute;right:16px;top:9px;color:var(--muted)}
+    .toolbar{display:flex;gap:8px}.btn{border:0;border-radius:12px;min-height:42px;padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}.btn-primary{background:var(--teal);color:#fff}.btn-ghost{background:var(--mint-2);color:var(--teal)}
+    .hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#0f4139 0%,#0b6f62 54%,#119983 100%);color:#fff;padding:78px 0 56px}
+    .hero:before,.hero:after{content:"";position:absolute;border-radius:50%;border:1px solid rgba(255,255,255,.12)}.hero:before{width:440px;height:440px;left:-160px;top:-210px}.hero:after{width:620px;height:620px;right:-310px;bottom:-420px}
+    .hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.05fr .95fr;gap:54px;align-items:center}
+    .kicker{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.09);padding:6px 12px;border-radius:999px;font-size:.82rem}.kicker i{width:7px;height:7px;border-radius:50%;background:#8ce3c8}
+    h1{font-size:clamp(2rem,4vw,4.4rem);line-height:1.18;margin:22px 0 18px;letter-spacing:-1.5px}.hero p{font-size:1.06rem;color:#d9eee8;max-width:650px;margin:0}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}.hero-actions a{padding:11px 18px;border-radius:14px;background:#fff;color:var(--teal);font-weight:800}.hero-actions a.alt{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.2);color:#fff}
+    .browser{background:#fff;color:var(--ink);border-radius:22px;padding:12px;box-shadow:0 30px 80px rgba(0,0,0,.28);transform:rotate(-1deg)}.browser-top{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);padding:3px 3px 11px}.browser-top i{width:9px;height:9px;border-radius:50%;background:#ff7d66}.browser-top i:nth-child(2){background:#f3c254}.browser-top i:nth-child(3){background:#65c391}.browser-url{height:21px;border-radius:8px;background:#f0f4f2;flex:1;margin-right:8px;font-size:.58rem;color:#8a9d98;text-align:center;line-height:21px;direction:ltr}
+    .dash-preview{display:grid;grid-template-columns:88px 1fr;min-height:315px}.mini-side{background:#103d36;color:#fff;border-radius:0 0 14px 14px;padding:15px 9px}.mini-logo{width:35px;height:35px;background:#fff;color:var(--teal);border-radius:12px;display:grid;place-items:center;margin:0 auto 20px;font-weight:900}.side-line{height:7px;border-radius:5px;background:rgba(255,255,255,.15);margin:12px 3px}.side-line.active{background:#6ed6bd;width:75%}
+    .mini-main{padding:18px}.mini-greet{background:linear-gradient(135deg,#e9f7f2,#f7fbf9);border-radius:16px;padding:14px;display:flex;justify-content:space-between;align-items:center}.mini-greet strong{font-size:.82rem}.child-pill{font-size:.57rem;background:#fff;border:1px solid #cfe4dc;padding:4px 8px;border-radius:999px}.mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.mini-stat{border:1px solid var(--line);border-radius:12px;padding:10px}.mini-stat b{display:block;font-size:1rem;color:var(--teal)}.mini-stat small{font-size:.54rem;color:var(--muted)}.today{margin-top:10px;background:#fff6dc;border-radius:13px;padding:12px;display:flex;gap:10px}.today-icon{width:34px;height:34px;border-radius:10px;background:#f0c75e;color:#fff;display:grid;place-items:center}.today strong{font-size:.66rem;display:block}.today small{font-size:.54rem;color:var(--muted)}
+    .hero-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}.meta-chip{display:flex;align-items:center;gap:8px;font-size:.78rem;color:#d9eee8}.meta-chip b{color:#fff}
+    .section{padding:72px 0}.section.alt{background:#fff}.section-head{display:flex;justify-content:space-between;gap:30px;align-items:end;margin-bottom:28px}.eyebrow{display:block;color:var(--teal);font-weight:900;font-size:.8rem;letter-spacing:.2px;margin-bottom:6px}.section h2{font-size:clamp(1.65rem,2.5vw,2.55rem);line-height:1.35;margin:0}.section-head p{max-width:580px;color:var(--muted);margin:0}
+    .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.summary-card{background:#fff;border:1px solid var(--line);padding:22px;border-radius:20px;box-shadow:0 10px 30px rgba(23,51,46,.05)}.summary-card span{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:var(--mint);color:var(--teal);font-weight:900}.summary-card b{font-size:1.55rem;display:block;margin-top:14px}.summary-card small{color:var(--muted)}
+    .flow{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:center}.flow-step{position:relative;background:#fff;border:1px solid var(--line);border-radius:18px;padding:17px 12px;text-align:center;min-height:120px}.flow-step:after{content:"←";position:absolute;left:-13px;top:43px;color:#88a099;font-weight:900}.flow-step:nth-child(6):after{display:none}.flow-step i{width:40px;height:40px;border-radius:13px;background:var(--mint);color:var(--teal);display:grid;place-items:center;margin:0 auto 8px;font-style:normal;font-weight:900}.flow-step b{font-size:.82rem;display:block}.flow-step small{color:var(--muted);font-size:.68rem}
+    .filterbar{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 28px}.filter{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;padding:8px 14px;cursor:pointer}.filter.active{background:var(--teal);color:#fff;border-color:var(--teal)}
+    .feature-list{display:grid;gap:22px}.feature{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:0 14px 42px rgba(23,51,46,.055)}.feature[hidden]{display:none}.feature-grid{display:grid;grid-template-columns:1fr 1.12fr;min-height:400px}.feature-copy{padding:34px}.feature-visual{padding:28px;background:linear-gradient(145deg,#f0f7f4,#e6f2ee);display:flex;align-items:center;justify-content:center}.feature:nth-child(3n+2) .feature-visual{background:linear-gradient(145deg,#fff6ed,#fff0eb)}.feature:nth-child(3n) .feature-visual{background:linear-gradient(145deg,#eff4ff,#f4efff)}
+    .feature-top{display:flex;align-items:flex-start;gap:15px}.feature-no{width:48px;height:48px;border-radius:16px;background:var(--teal);color:#fff;display:grid;place-items:center;font-weight:900;flex:0 0 auto}.feature-title h3{font-size:1.35rem;margin:0 0 2px}.feature-title p{margin:0;color:var(--muted);font-size:.86rem}.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}.badge{font-size:.69rem;border-radius:999px;padding:4px 9px;background:var(--mint);color:var(--teal);font-weight:800}.badge.stage{background:var(--blue-soft);color:var(--blue)}.badge.done{background:#e4f7ed;color:#258157}.badge.partial{background:var(--gold-soft);color:#906916}.badge.route{direction:ltr;background:#f1f4f3;color:#62766f;font-weight:500}
+    .quote{position:relative;margin:22px 0 18px;padding:17px 18px 17px 45px;background:#f7faf8;border-right:4px solid var(--teal);border-radius:14px;color:#405c55;font-size:.9rem}.quote:before{content:"”";position:absolute;left:16px;top:4px;font-size:2.4rem;color:#bad3cb;font-family:serif}.quote b{display:block;color:var(--ink);font-size:.72rem;margin-bottom:3px}
+    .does{margin:0;padding:0;list-style:none;display:grid;gap:8px}.does li{position:relative;padding-right:24px;font-size:.88rem;color:#435e57}.does li:before{content:"✓";position:absolute;right:0;top:0;color:var(--teal);font-weight:900}.feature-footer{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px dashed var(--line);font-size:.72rem;color:var(--muted)}.feature-footer b{color:var(--ink)}
+    .screen{width:min(470px,100%);background:#fff;border:1px solid rgba(30,68,59,.12);border-radius:20px;box-shadow:0 20px 55px rgba(23,51,46,.14);overflow:hidden}.screen-head{height:48px;background:#113f38;color:#fff;padding:10px 15px;display:flex;align-items:center;justify-content:space-between}.screen-head b{font-size:.75rem}.screen-head span{font-size:.58rem;background:rgba(255,255,255,.14);padding:3px 8px;border-radius:999px}.screen-body{padding:16px}.ui-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.ui-title strong{font-size:.78rem}.ui-title small{color:var(--muted);font-size:.58rem}.ui-btn{background:var(--teal);color:#fff;border-radius:8px;padding:5px 9px;font-size:.55rem}.ui-card{border:1px solid var(--line);border-radius:13px;padding:11px;margin-top:8px}.ui-card.active{border-color:#76bdad;background:#f1faf7}.ui-row{display:flex;align-items:center;gap:8px}.avatar{width:34px;height:34px;border-radius:12px;background:var(--coral-soft);color:var(--coral);display:grid;place-items:center;font-size:.72rem;font-weight:900}.ui-row .grow{flex:1}.ui-row b{font-size:.65rem;display:block}.ui-row small{font-size:.52rem;color:var(--muted);display:block}.progress{height:6px;background:#eaf0ed;border-radius:999px;overflow:hidden;margin-top:8px}.progress i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),#4bc6ae);border-radius:inherit}.columns-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.columns-3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.tiny-stat{border-radius:11px;background:#f5f8f7;padding:10px;text-align:center}.tiny-stat b{display:block;color:var(--teal);font-size:.9rem}.tiny-stat small{font-size:.48rem;color:var(--muted)}
+    .steps{display:flex;gap:5px;align-items:center}.step-dot{flex:1;text-align:center}.step-dot i{width:23px;height:23px;margin:auto;border-radius:50%;background:#dfe9e5;color:#78908a;display:grid;place-items:center;font-size:.48rem;font-style:normal}.step-dot.done i{background:var(--teal);color:#fff}.step-dot.now i{background:var(--gold);color:#fff;box-shadow:0 0 0 4px #fff2ca}.step-dot small{font-size:.42rem;color:var(--muted)}
+    .chart{height:110px;display:flex;align-items:flex-end;gap:8px;padding:8px 6px 0}.chart i{flex:1;background:linear-gradient(180deg,#48b8a3,#d8f0e9);border-radius:7px 7px 2px 2px;position:relative}.chart i:after{content:attr(data-v);position:absolute;top:-17px;left:0;right:0;text-align:center;font-size:.48rem;color:var(--muted)}
+    .tree{display:grid;gap:10px}.tree-root{width:62%;margin:auto;background:#143f39;color:#fff;padding:10px;border-radius:12px;text-align:center;font-size:.62rem;position:relative}.tree-root:after{content:"";position:absolute;width:1px;height:18px;background:#88ada4;bottom:-18px;left:50%}.tree-branches{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:8px}.branch{position:relative;border:1px solid var(--line);padding:11px;border-radius:12px;background:#fff}.branch:before{content:"";position:absolute;top:-10px;width:calc(50% + 7px);height:10px;border-top:1px solid #88ada4}.branch:first-child:before{left:-7px;border-left:1px solid #88ada4}.branch:last-child:before{right:-7px;border-right:1px solid #88ada4}.branch.good{border-color:#8dceb9;background:#f0faf6}.branch.bad{border-color:#efb3aa;background:#fff5f2}.branch small{font-size:.48rem;color:var(--muted)}.branch b{font-size:.6rem;display:block}.branch em{font-style:normal;font-size:.48rem;color:var(--coral)}
+    .bubble{max-width:86%;padding:9px 11px;border-radius:13px;margin:7px 0;font-size:.58rem}.bubble.parent{margin-right:auto;background:#eef3f1}.bubble.bot{background:#e7f6f1;border-bottom-right-radius:3px}.sources{display:flex;gap:4px;flex-wrap:wrap;margin-top:7px}.source{font-size:.44rem;padding:3px 6px;border-radius:999px;background:#fff;border:1px solid #cce2da;color:var(--teal)}
+    .money{display:grid;grid-template-columns:1fr 52px 1fr;align-items:center;gap:8px}.money-card{border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center}.money-card.org{background:#edf6ff;border-color:#bdd1ea}.money-card.parent{background:#fff5eb;border-color:#edd1b8}.money-card b{font-size:1.2rem;display:block}.money-card small{font-size:.52rem;color:var(--muted)}.money-arrow{font-size:1.2rem;text-align:center;color:var(--teal)}
+    .form-field{margin:7px 0}.form-field label{display:block;font-size:.52rem;color:var(--muted);margin-bottom:3px}.fake-input{height:30px;border:1px solid var(--line);border-radius:8px;background:#fafcfb}.choice-row{display:flex;gap:5px}.choice-row i{font-style:normal;font-size:.48rem;border:1px solid var(--line);border-radius:8px;padding:5px 7px;background:#fff}.choice-row i.on{border-color:var(--teal);background:var(--mint);color:var(--teal)}
+    .matrix-wrap{overflow:auto;border:1px solid var(--line);border-radius:18px;background:#fff}.matrix{width:100%;border-collapse:collapse;min-width:960px}.matrix th,.matrix td{padding:13px 14px;text-align:right;border-bottom:1px solid var(--line);vertical-align:top;font-size:.78rem}.matrix th{background:#113f38;color:#fff;position:sticky;top:0}.matrix tr:last-child td{border-bottom:0}.matrix td:first-child{font-weight:900;color:var(--teal)}.state{white-space:nowrap;font-size:.67rem;padding:4px 8px;border-radius:999px;display:inline-block}.state.done{background:#e4f7ed;color:#258157}.state.partial{background:var(--gold-soft);color:#906916}.state.wait{background:#f0f1f3;color:#68707a}
+    .remaining{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.remaining-card{border-radius:18px;border:1px solid var(--line);background:#fff;padding:20px}.remaining-card h3{font-size:1rem;margin:8px 0}.remaining-card p{font-size:.78rem;color:var(--muted);margin:0}.remaining-card span{font-size:.64rem;font-weight:800;padding:4px 8px;border-radius:999px;background:var(--gold-soft);color:#906916}
+    .footer{background:#102f2a;color:#dcece7;padding:44px 0 28px}.footer-grid{display:flex;justify-content:space-between;align-items:flex-start;gap:30px}.footer h2{color:#fff;margin:0 0 8px;font-size:1.3rem}.footer p{margin:0;max-width:680px;font-size:.82rem}.footer-meta{text-align:left;font-size:.7rem;color:#9fbbb3}.footer-meta b{display:block;color:#fff;direction:ltr}
+    .backtop{position:fixed;left:22px;bottom:22px;width:44px;height:44px;border-radius:14px;border:0;background:var(--teal);color:#fff;box-shadow:0 10px 25px rgba(11,123,108,.25);cursor:pointer;opacity:0;pointer-events:none;transition:.2s}.backtop.show{opacity:1;pointer-events:auto}
+    .empty-search{display:none;text-align:center;padding:40px;background:#fff;border:1px dashed var(--line);border-radius:18px;color:var(--muted)}
+    @media(max-width:980px){.hero-grid,.feature-grid{grid-template-columns:1fr}.feature-visual{order:-1}.summary-grid{grid-template-columns:repeat(2,1fr)}.flow{grid-template-columns:repeat(3,1fr)}.flow-step:nth-child(3):after,.flow-step:nth-child(6):after{display:none}.remaining{grid-template-columns:1fr}.search{display:none}}
+    @media(max-width:640px){.container{width:min(100% - 24px,1220px)}.topbar-inner{height:64px}.brand small,.toolbar .btn-ghost{display:none}.toolbar{margin-right:auto}.hero{padding:54px 0 38px}.hero-grid{gap:30px}.dash-preview{grid-template-columns:66px 1fr;min-height:280px}.mini-main{padding:11px}.mini-stats{grid-template-columns:1fr}.mini-stat:nth-child(n+2){display:none}.section{padding:50px 0}.section-head{display:block}.section-head p{margin-top:10px}.summary-grid{grid-template-columns:1fr 1fr}.flow{grid-template-columns:1fr 1fr}.flow-step:nth-child(2n):after{display:none}.feature-copy,.feature-visual{padding:20px}.feature-top{display:block}.feature-no{margin-bottom:12px}.footer-grid{display:block}.footer-meta{text-align:right;margin-top:20px}.columns-3{grid-template-columns:1fr 1fr}.browser{transform:none}}
+    @media print{body{background:#fff;font-size:10pt}.topbar,.hero-actions,.filterbar,.backtop{display:none!important}.hero{padding:30px 0;background:#164f46!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.hero-grid{grid-template-columns:1fr 1fr}.browser{box-shadow:none}.section{padding:28px 0}.feature{break-inside:avoid;box-shadow:none;margin-bottom:14px}.feature-grid{grid-template-columns:1fr 1fr;min-height:0}.feature-copy,.feature-visual{padding:18px}.matrix th{position:static}.footer{break-before:page}.summary-card{box-shadow:none}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="#top"><span class="brand-mark">و</span><span><strong>راهنمای والدیار</strong><small>ردیابی پروپوزال تا محصول</small></span></a>
+      <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="جست‌وجو در قابلیت‌ها؛ مثلاً بامریند، ۷۰/۳۰ یا فرم‌ساز"></label>
+      <div class="toolbar"><button class="btn btn-ghost" id="expandAll">نمایش همه</button><button class="btn btn-primary" onclick="window.print()">چاپ / PDF</button></div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="kicker"><i></i> سند مصور تحویل محصول · نسخه ۱</span>
+          <h1>از هر درخواست پروپوزال<br>تا بخش واقعی سایت</h1>
+          <p>این سند نشان می‌دهد هر صفحه و قابلیت والدیار در پاسخ به کدام نیاز ساخته شده، چه کاری انجام می‌دهد، والد یا مدیر چگونه از آن استفاده می‌کند و وضعیت واقعی آن در نسخه مستقر چیست.</p>
+          <div class="hero-actions"><a href="#features">مشاهده بخش‌های سایت</a><a class="alt" href="#matrix">جدول انطباق کامل</a></div>
+          <div class="hero-meta"><span class="meta-chip"><b>۶</b> استیج فنی</span><span class="meta-chip"><b>۳۷</b> آزمون خودکار</span><span class="meta-chip"><b>۳</b> نقش کاربری</span><span class="meta-chip"><b>Production</b> فعال</span></div>
+        </div>
+        <div class="browser" aria-label="نمای شماتیک داشبورد والد">
+          <div class="browser-top"><i></i><i></i><i></i><span class="browser-url">srun.ir/valedgari/dashboard/</span></div>
+          <div class="dash-preview">
+            <aside class="mini-side"><div class="mini-logo">و</div><div class="side-line active"></div><div class="side-line"></div><div class="side-line"></div><div class="side-line"></div><div class="side-line"></div></aside>
+            <div class="mini-main">
+              <div class="mini-greet"><div><small>سلام مریم</small><br><strong>امروز برای رابطه با زهرا چه قدمی برمی‌داریم؟</strong></div><span class="child-pill">زهرا ▾</span></div>
+              <div class="mini-stats"><div class="mini-stat"><b>۳/۷</b><small>قدم‌های این هفته</small></div><div class="mini-stat"><b>۸۲٪</b><small>نمای فرزند</small></div><div class="mini-stat"><b>۱</b><small>پیشنهاد فعال</small></div></div>
+              <div class="today"><span class="today-icon">✓</span><div><strong>اقدام امروز: نام‌گذاری احساس</strong><small>پیش از ارائه راه‌حل، احساس زهرا را در یک جمله بازتاب دهید.</small></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head"><div><span class="eyebrow">خلاصه مدیریتی</span><h2>پروپوزال به یک مسیر پیوسته تبدیل شده است</h2></div><p>قابلیت‌ها جدا از هم رها نشده‌اند؛ داده هر فرزند از سنجش و شناخت آغاز می‌شود و به توصیه، برنامه هفتگی، ثبت نتیجه و بازسنجی می‌رسد.</p></div>
+        <div class="summary-grid">
+          <article class="summary-card"><span>👪</span><b>چندفرزندی</b><small>پرونده، سنجش و مسیر مستقل برای هر فرزند</small></article>
+          <article class="summary-card"><span>⌁</span><b>شخصی‌سازی</b><small>پیشنهاد متفاوت بر اساس نمای همان فرزند</small></article>
+          <article class="summary-card"><span>٪</span><b>۷۰/۳۰</b><small>حمایت سازمانی، بودجه و سهم دوطرفه</small></article>
+          <article class="summary-card"><span>✓</span><b>تأیید علمی</b><small>نسخه‌بندی، ناظر مستقل و تاریخچه ممیزی</small></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="journey">
+      <div class="container">
+        <div class="section-head"><div><span class="eyebrow">نقشه تجربه والد</span><h2>والد در سایت چه مسیری را طی می‌کند؟</h2></div><p>این همان پاسخ عملی به درخواست «مسیر منسجم آموزشی–مشاوره‌ای» است.</p></div>
+        <div class="flow">
+          <div class="flow-step"><i>۱</i><b>ورود و فرزند</b><small>ساخت حساب و پرونده مستقل</small></div>
+          <div class="flow-step"><i>۲</i><b>شناخت</b><small>نمای فرزند و رابطه</small></div>
+          <div class="flow-step"><i>۳</i><b>سنجش والد</b><small>چارچوب بامریند</small></div>
+          <div class="flow-step"><i>۴</i><b>موقعیت</b><small>موضوع و شدت واقعی</small></div>
+          <div class="flow-step"><i>۵</i><b>برنامه</b><small>توصیه و اقدام هفتگی</small></div>
+          <div class="flow-step"><i>۶</i><b>بازخورد</b><small>نتیجه واقعی و پیشنهاد بعدی</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-head"><div><span class="eyebrow">راهنمای بخش‌به‌بخش</span><h2>هر قسمت سایت برای کدام درخواست ساخته شده؟</h2></div><p>با فیلتر یا جست‌وجو، فقط بخش‌های مربوط به والد، مدیر، سازمان یا زیرساخت را ببینید.</p></div>
+        <div class="filterbar" role="group" aria-label="فیلتر بخش‌ها">
+          <button class="filter active" data-filter="all">همه بخش‌ها</button><button class="filter" data-filter="parent">پنل والد</button><button class="filter" data-filter="admin">پنل مدیر</button><button class="filter" data-filter="organization">سازمانی</button><button class="filter" data-filter="governance">علمی و عملیاتی</button>
+        </div>
+        <div class="empty-search" id="emptySearch">موردی مطابق جست‌وجوی شما پیدا نشد.</div>
+        <div class="feature-list" id="featureList">
+
+          <article class="feature" data-kind="parent" data-search="لندینگ معرفی سایت تک صفحه حرکت بوت استرپ فونت وزیر">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۱</span><div class="feature-title"><h3>لندینگ و معرفی محصول</h3><p>صفحه نخست عمومی، والد‌پسند و واکنش‌گرا</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱</span><span class="badge">WS1</span><span class="badge done">تکمیل و مستقر</span><span class="badge route">/</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«یک سایت تک‌صفحه‌ای حرفه‌ای، والد‌پسند، با Bootstrap، Font Awesome، فونت وزیر و حرکت در بخش‌ها.»</div>
+              <ul class="does"><li>سه محور محصول را توضیح می‌دهد: سنجش، مهارت و موقعیت واقعی.</li><li>تفاوت توصیه عمومی با مسیر شخصی هر فرزند را معرفی می‌کند.</li><li>والد را مستقیماً به ثبت‌نام یا ورود هدایت می‌کند.</li></ul>
+              <div class="feature-footer"><span><b>کاربر:</b> بازدیدکننده</span><span><b>خروجی:</b> آشنایی و شروع ثبت‌نام</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>والدیار</b><span>مسیر آگاهانه والدگری</span></div><div class="screen-body"><div class="ui-card active"><div class="ui-row"><span class="avatar">و</span><div class="grow"><b>هر فرزند، یک مسیر مستقل</b><small>سنجش، یادگیری، تمرین و پیگیری در یک مسیر منسجم</small></div><span class="ui-btn">شروع رایگان</span></div></div><div class="columns-3"><div class="tiny-stat"><b>۱</b><small>سنجش والدگری</small></div><div class="tiny-stat"><b>۲</b><small>مهارت‌های والد</small></div><div class="tiny-stat"><b>۳</b><small>موقعیت واقعی</small></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent" data-search="ثبت نام ورود موبایل رمز عبور بدون کد تایید login register authentication">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۲</span><div class="feature-title"><h3>ثبت‌نام و ورود والدین</h3><p>ورود ساده با موبایل و رمز، بدون OTP در نسخه فعلی</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱</span><span class="badge">WS2</span><span class="badge done">تکمیل</span><span class="badge route">/auth/login · /auth/register</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«هیچ کد تأییدی فعلاً نمی‌خواهیم؛ موبایل و رمز عبور بزند و دفعات بعد با همان رمز وارد شود.»</div>
+              <ul class="does"><li>شماره موبایل ایرانی و حداقل طول رمز را کنترل می‌کند.</li><li>رمز را به‌صورت هش‌شده ذخیره می‌کند، نه متن قابل مشاهده.</li><li>پس از ثبت‌نام، رضایت حریم خصوصی را ثبت و والد را وارد حساب می‌کند.</li></ul>
+              <div class="feature-footer"><span><b>امنیت:</b> CSRF، نشست امن، HttpOnly</span><span><b>عمداً موجود نیست:</b> OTP و بازیابی خودکار رمز</span></div>
+            </div><div class="feature-visual">
+              <div class="screen" style="max-width:360px"><div class="screen-head"><b>ورود به والدیار</b><span>حساب والد</span></div><div class="screen-body"><div class="form-field"><label>شماره موبایل</label><div class="fake-input"></div></div><div class="form-field"><label>رمز عبور</label><div class="fake-input"></div></div><div class="ui-card active"><div class="ui-row"><div class="grow"><b>ورود امن و ساده</b><small>بدون کد تأیید در نسخه فعلی</small></div><span class="ui-btn">ورود</span></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent" data-search="داشبورد والد چند فرزند پرونده مستقل زهرا علی child switcher">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۳</span><div class="feature-title"><h3>داشبورد والد و چندفرزندی</h3><p>یک حساب، چند پرونده کاملاً مستقل</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱ و ۲</span><span class="badge">WS4</span><span class="badge done">تکمیل</span><span class="badge route">/dashboard/ · /dashboard/children</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«داشبورد والدین که بتوانند چند فرزند داشته باشند؛ برای هر فرزند به‌صورت مجزا.»</div>
+              <ul class="does"><li>والد فرزند جدید اضافه و فرزند فعال را تعویض می‌کند.</li><li>سنجش، نمای رفتاری، پیشنهاد، برنامه و گفت‌وگو برای هر فرزند جدا می‌ماند.</li><li>داشبورد همیشه سه چیز را نشان می‌دهد: موقعیت فعلی، دلیل پیشنهاد و قدم بعدی.</li></ul>
+              <div class="feature-footer"><span><b>مثال:</b> داده زهرا به علی منتقل نمی‌شود</span><span><b>کنترل:</b> مالکیت پرونده در همه مسیرها</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>داشبورد خانواده</b><span>فرزند فعال: زهرا ▾</span></div><div class="screen-body"><div class="columns-2"><div class="ui-card active"><div class="ui-row"><span class="avatar">ز</span><div class="grow"><b>زهرا · ۱۳ سال</b><small>برنامه فعال: خشم و تعارض</small></div></div><div class="progress"><i style="width:58%"></i></div></div><div class="ui-card"><div class="ui-row"><span class="avatar" style="background:var(--blue-soft);color:var(--blue)">ع</span><div class="grow"><b>علی · ۹ سال</b><small>نمای مستقل و برنامه جدا</small></div></div><div class="progress"><i style="width:32%"></i></div></div></div><div class="ui-card"><div class="ui-title"><strong>اقدام امروز زهرا</strong><span class="ui-btn">قدم ۳ از ۷</span></div><small style="font-size:.55rem;color:var(--muted)">قبل از گفت‌وگو، نشانه اولیه تنش را مشاهده و ثبت کنید.</small></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent" data-search="نمای فرزند آزمون شناخت شخصیت مشکلات خشم محرک آرام سازی رابطه parent child profile">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۴</span><div class="feature-title"><h3>نمای اختصاصی هر فرزند</h3><p>شناخت آموزشیِ نقاط قوت، محرک‌ها و رابطه</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۲</span><span class="badge">WS4</span><span class="badge done">تکمیل</span><span class="badge route">/dashboard/child-profile</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«یکی دو آزمون بگیریم تا حدود نمای شخصیتی و مشکلات هر فرزند مشخص شود؛ ناظر بر هر فرزند هم سؤال‌هایی از والد پرسیده شود.»</div>
+              <ul class="does"><li>شدت هیجان، سازگاری، حساسیت، گفت‌وگو، پشتکار و راحتی اجتماعی را ثبت می‌کند.</li><li>نقاط قوت، محرک‌ها، راه آرام‌شدن، الگوی خشم و اولویت‌ها را نگه می‌دارد.</li><li>فرم رابطه‌ای هشت‌گزاره‌ای و تاریخچه نسخه‌های قبلی دارد.</li></ul>
+              <div class="feature-footer"><span><b>مرز علمی:</b> نمای آموزشی است، نه تشخیص شخصیت یا اختلال</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>نمای زهرا</b><span>نسخه ۳ · امروز</span></div><div class="screen-body"><div class="columns-3"><div class="tiny-stat"><b>۸۰٪</b><small>گفت‌وگو</small></div><div class="tiny-stat"><b>۶۵٪</b><small>سازگاری</small></div><div class="tiny-stat"><b>۷۵٪</b><small>حساسیت</small></div></div><div class="ui-card"><div class="ui-title"><strong>محرک‌های مهم</strong><small>براساس گزارش والد</small></div><div class="choice-row"><i class="on">فشار مستقیم</i><i>خستگی</i><i class="on">محدودیت موبایل</i></div></div><div class="ui-card"><div class="ui-title"><strong>راه آرام‌شدن</strong><small>پیشنهاد شروع</small></div><small style="font-size:.55rem;color:var(--muted)">فضای آرام + دو انتخاب محدود + بازگشت زمان‌دار به گفت‌وگو</small></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent governance" data-search="سنجش سبک فرزندپروری بامریند استاندارد authoritative authoritarian permissive parenting style">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۵</span><div class="feature-title"><h3>سنجش سبک والدگری بامریند</h3><p>موتور علمی نسخه‌دار با سه بُعد</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۲</span><span class="badge">WS5</span><span class="badge partial">موتور کامل؛ محتوا منتظر تأیید</span><span class="badge route">/dashboard/parenting-style</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«فعلاً طبق سبک فرزندپروری بامریند جلو برویم؛ از ۱۲ سبک/چارچوب فعلاً یکی را کاربردی کنیم.»</div>
+              <ul class="does"><li>سؤال مستقیم و معکوس، وزن و امتیاز سه بُعد را محاسبه می‌کند.</li><li>نتیجه را به رابطه والد با همان فرزند و نسخه ابزار متصل می‌کند.</li><li>ابزار ناقص یا فاقد منبع، مجوز و پوشش سه بُعد را منتشر نمی‌کند.</li></ul>
+              <div class="feature-footer"><span><b>آماده:</b> موتور و ورود JSON</span><span><b>وابسته:</b> متن، ترجمه، مجوز و قواعد مصوب مسئول علمی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>نتیجه سبک والدگری</b><span>نسخه علمی</span></div><div class="screen-body"><div class="ui-title"><strong>نمای سه‌بُعدی</strong><small>برای رابطه با زهرا</small></div><div class="chart"><i data-v="۸۱٪" style="height:81%"></i><i data-v="۳۸٪" style="height:38%;background:linear-gradient(180deg,#ef8a74,#ffe5df)"></i><i data-v="۲۹٪" style="height:29%;background:linear-gradient(180deg,#8e77c3,#eee8ff)"></i></div><div class="columns-3"><div class="tiny-stat"><small>مقتدرانه</small></div><div class="tiny-stat"><small>مستبدانه</small></div><div class="tiny-stat"><small>سهل‌گیرانه</small></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent admin" data-search="مهارت والدگری دسته بندی حل مسئله انگیزه نوجوان گوش دادن همدلی خودتنظیمی taxonomy skills">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۶</span><div class="feature-title"><h3>مهارت‌ها و ریزدرس‌های والدگری</h3><p>دسته‌بندی شش‌حوزه‌ای به‌جای محتوای پراکنده</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱ و ۴</span><span class="badge">WS6</span><span class="badge partial">۶ مهارت پایلوت از ۲۰ هدف</span><span class="badge route">/dashboard/skills</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«مهارت حل مسئله، انگیزه‌سازی، شناخت نوجوان، ارتباط مؤثر، گوش‌دادن فعال و همدلی؛ باید دسته‌بندی معقول داشته باشیم.»</div>
+              <ul class="does"><li>مهارت‌ها را در شش حوزه خودتنظیمی، ارتباط، مرز، رشد، حل تعارض و ریسک سامان می‌دهد.</li><li>هر ریزدرس هدف، متن کوتاه، تمرین، دام رایج، زمان و نسخه دارد.</li><li>تکمیل درس به پیشرفت همان فرزند و برنامه هفتگی متصل می‌شود.</li></ul>
+              <div class="feature-footer"><span><b>موجود:</b> ۷ ریزدرس اولیه</span><span><b>باقی:</b> تولید و تأیید ۱۴ مهارت بعدی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>کتابخانه مهارت‌ها</b><span>۶ حوزه</span></div><div class="screen-body"><div class="columns-2"><div class="ui-card active"><div class="ui-row"><span class="avatar">۱</span><div class="grow"><b>خودتنظیمی والد</b><small>مکث، مدیریت خشم، ترمیم</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">۲</span><div class="grow"><b>ارتباط و پیوند</b><small>همدلی و گوش‌دادن فعال</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">۳</span><div class="grow"><b>ساختار و مرز</b><small>قانون و پیامد منطقی</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">۴</span><div class="grow"><b>حل مسئله</b><small>مذاکره و تصمیم مشترک</small></div></div></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent admin" data-search="موقعیت واقعی 25 موقعیت پنج شدت درخت تصمیم رفتار اشتباه پیامد scenario tree">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۷</span><div class="feature-title"><h3>موقعیت‌های واقعی و پنج سطح شدت</h3><p>تمرین تصمیم پیش از مواجهه واقعی</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱ و ۳</span><span class="badge">WS7</span><span class="badge partial">۵ موضوع از ۲۵ هدف</span><span class="badge route">/dashboard/scenario</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«۲۵ موقعیت که بیشترین مسائل نوجوان را شامل می‌شود؛ هر قسمت در ۵ ضریب شدت از ضعیف تا بحرانی.»</div>
+              <ul class="does"><li>والد موضوع و شدت ۱ تا ۵ را انتخاب و پاسخ خود را محک می‌زند.</li><li>پاسخ مقتدرانه، برخورد اشتباه و پیامد احتمالی را می‌بیند.</li><li>در شدت ۴ و ۵، مسیر ایمنی بر آموزش معمول مقدم می‌شود.</li></ul>
+              <div class="feature-footer"><span><b>پایلوت:</b> موبایل، افت تحصیلی، خشم، دروغ‌گویی، تعارض دوستان</span><span><b>باقی:</b> ۲۰ موضوع</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>موقعیت: استفاده از موبایل</b><span>شدت ۳ · جدی</span></div><div class="screen-body"><div class="steps"><div class="step-dot done"><i>۱</i><small>خفیف</small></div><div class="step-dot done"><i>۲</i><small>قابل توجه</small></div><div class="step-dot now"><i>۳</i><small>جدی</small></div><div class="step-dot"><i>۴</i><small>شدید</small></div><div class="step-dot"><i>۵</i><small>بحرانی</small></div></div><div class="tree" style="margin-top:18px"><div class="tree-root">والد چه واکنشی انتخاب می‌کند؟</div><div class="tree-branches"><div class="branch good"><small>پیشنهاد مقتدرانه</small><b>همدلی + اجرای توافق</b><em style="color:var(--teal)">مرز روشن، رابطه امن</em></div><div class="branch bad"><small>خطای رایج</small><b>تهدید و گرفتن اجباری</b><em>مقاومت و پنهان‌کاری بیشتر</em></div></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent admin" data-search="شخصی سازی زهرا علی پیشنهاد متفاوت موتور قاعده شدت نمای فرزند recommendation personalization">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۸</span><div class="feature-title"><h3>موتور پیشنهاد شخصی‌سازی‌شده</h3><p>یک موقعیت، پاسخ متفاوت برای هر فرزند</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۳</span><span class="badge">WS7</span><span class="badge done">موتور تکمیل</span><span class="badge route">/dashboard/recommendations</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«اگر زهرا خشمگین شد این‌گونه رفتار کن؛ اگر علی خشمگین شد آن‌طور. پیشنهاد در هر موقعیت به ازای هر فرزند فرق کند.»</div>
+              <ul class="does"><li>نمای فرزند، سبک والد، شدت، امتیاز رابطه و نتیجه اقدام قبلی را ترکیب می‌کند.</li><li>«چرا این پیشنهاد؟»، رفتار نامناسب، تمرین خانه و مهارت مرتبط را نمایش می‌دهد.</li><li>اگر اقدام قبلی وضعیت را بدتر کرده باشد، همان توصیه بدون تغییر تکرار نمی‌شود.</li></ul>
+              <div class="feature-footer"><span><b>روش:</b> قواعد منتشرشده و قابل ممیزی</span><span><b>نه:</b> حدس آزاد یا تشخیص ماشینی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>پیشنهاد شخصی</b><span>موضوع یکسان: خشم</span></div><div class="screen-body"><div class="columns-2"><div class="ui-card active"><div class="ui-row"><span class="avatar">ز</span><div class="grow"><b>برای زهرا</b><small>حساس به فشار مستقیم</small></div></div><p style="font-size:.52rem;color:var(--muted)">کاهش محرک، نام‌گذاری احساس و دو انتخاب محدود.</p></div><div class="ui-card"><div class="ui-row"><span class="avatar" style="background:var(--blue-soft);color:var(--blue)">ع</span><div class="grow"><b>برای علی</b><small>الگوی کناره‌گیری</small></div></div><p style="font-size:.52rem;color:var(--muted)">فاصله کوتاه، زمان بازگشت مشخص و پرسش غیرمستقیم.</p></div></div><div class="ui-card"><div class="ui-title"><strong>چرا متفاوت است؟</strong><small>قاعده نسخه ۲</small></div><div class="choice-row"><i class="on">نمای فرزند</i><i>شدت ۳</i><i>نتیجه قبلی</i></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent admin" data-search="مسیر آموزشی مشاوره هفتگی اقدام امروز هفت قدم یادگیری تمرین خانه مرور weekly journey">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۰۹</span><div class="feature-title"><h3>مسیر هفتگی آموزشی–مشاوره‌ای</h3><p>از شناخت تا اقدام واقعی و مرور نتیجه</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۴</span><span class="badge">WS9</span><span class="badge done">تکمیل فنی</span><span class="badge route">/dashboard/journey</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«کار ما باید یک مسیر منسجم آموزشی–مشاوره‌ای باشد، نه امکانات پراکنده.»</div>
+              <ul class="does"><li>برای هر فرزند فقط یک هدف و برنامه فعال هفت‌قدمی می‌سازد.</li><li>اقدام امروز، علت آن، زمان لازم، تمرین و دام رایج را برجسته می‌کند.</li><li>قدم‌ها ترتیبی‌اند و در پایان، تغییر رابطه و تمرکز بعدی ثبت می‌شود.</li></ul>
+              <div class="feature-footer"><span><b>چرخه:</b> یادگیری ← مشاهده ← تنظیم ← تمرین ← خانه ← ترمیم ← مرور</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>برنامه این هفته زهرا</b><span>۳ از ۷ قدم</span></div><div class="screen-body"><div class="steps"><div class="step-dot done"><i>✓</i><small>یادگیری</small></div><div class="step-dot done"><i>✓</i><small>مشاهده</small></div><div class="step-dot now"><i>۳</i><small>تنظیم</small></div><div class="step-dot"><i>۴</i><small>موقعیت</small></div><div class="step-dot"><i>۵</i><small>خانه</small></div><div class="step-dot"><i>۶</i><small>ترمیم</small></div><div class="step-dot"><i>۷</i><small>مرور</small></div></div><div class="ui-card active"><div class="ui-title"><strong>اقدام امروز: مکث پیش از پاسخ</strong><span class="ui-btn">۸ دقیقه</span></div><small style="font-size:.55rem;color:var(--muted)">نشانه بدنی خشم خود را پیدا کنید و پیش از پاسخ، یک مکث کوتاه بسازید.</small><div class="progress"><i style="width:43%"></i></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="parent admin governance" data-search="هوش مصنوعی دستیار چت ارزش افزوده منبع دار ایمنی بحران AI assistant">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۰</span><div class="feature-title"><h3>همراه هوشمند کنترل‌شده</h3><p>گفت‌وگو بر پایه پرونده و محتوای مصوب</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۵</span><span class="badge">WS9</span><span class="badge done">هسته فعال</span><span class="badge route">/dashboard/assistant</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«والد احتمالاً با هوش مصنوعی راحت است؛ باید ارزش افزوده درست‌وحسابی تعریف شود.»</div>
+              <ul class="does"><li>از برنامه فعال، پیشنهاد شخصی، ریزدرس و قواعد منتشرشده پاسخ می‌سازد.</li><li>منبع، شناسه و نسخه پاسخ را به والد نشان می‌دهد.</li><li>تشخیص، تجویز، درخواست خارج از دامنه و بحران را به مسیرهای کنترل‌شده می‌برد.</li></ul>
+              <div class="feature-footer"><span><b>ارزش افزوده:</b> حافظه ساختاریافته، پیگیری و نظارت</span><span><b>وابستگی:</b> بدون نیاز اجباری به API بیرونی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>همراه والدیار · زهرا</b><span>منبع‌دار ✓</span></div><div class="screen-body"><div class="bubble parent">وقتی با عصبانیت گوشی را کنار نمی‌گذارد چه بگویم؟</div><div class="bubble bot">با توجه به حساسیت زهرا به فشار مستقیم، ابتدا احساسش را نام‌گذاری کنید؛ سپس دو انتخاب محدود برای زمان پایان استفاده بدهید.<div class="sources"><span class="source">برنامه هفته · v2</span><span class="source">قاعده موبایل · v3</span><span class="source">نمای زهرا · v3</span></div></div><div class="ui-card"><small style="font-size:.5rem;color:var(--muted)">این پاسخ تشخیص بالینی نیست و فقط از محتوای منتشرشده والدیار ساخته شده است.</small></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="organization parent admin" data-search="سازمان پروژه کد 70 درصد 30 درصد حمایت بودجه ظرفیت پرداخت صورتحساب CSV">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۱</span><div class="feature-title"><h3>پروژه سازمانی و پرداخت سهمی</h3><p>کد حمایت واقعی، نه تخفیف ساده</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱.۵</span><span class="badge">WS3</span><span class="badge done">دفتر مالی تکمیل</span><span class="badge route">/dashboard/projects · /admin/projects</span></div>
+              <div class="quote"><b>درخواست الحاقیه</b>«اگر سازمانی ۷۰٪ بهای والدین را بپردازد و خودشان ۳۰٪، باید کدی وجود داشته باشد.»</div>
+              <ul class="does"><li>کد یکتا، بازه اعتبار، ظرفیت، بودجه، خدمات مشمول و سقف هر والد را کنترل می‌کند.</li><li>سهم سازمان و والد را جدا محاسبه و در تخصیص مالی ثبت می‌کند.</li><li>رزرو، پرداخت والد، تسویه، لغو، بازپرداخت و گزارش CSV دارد.</li></ul>
+              <div class="feature-footer"><span><b>مثال:</b> خدمت ۱۰۰٪ ← سازمان ۷۰٪ + والد ۳۰٪</span><span><b>باقی:</b> اتصال PSP واقعی پس از دریافت credential</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>طرح حمایت سازمانی</b><span>کد: ORG-70</span></div><div class="screen-body"><div class="money"><div class="money-card org"><b>۷۰٪</b><small>سهم سازمان</small></div><div class="money-arrow">←</div><div class="money-card parent"><b>۳۰٪</b><small>سهم والد</small></div></div><div class="ui-card active"><div class="ui-title"><strong>اعتبارسنجی کد</strong><small>موفق</small></div><div class="progress"><i style="width:68%"></i></div><div class="columns-3" style="margin-top:8px"><div class="tiny-stat"><b>۱۰</b><small>ظرفیت باقی</small></div><div class="tiny-stat"><b>فعال</b><small>بازه طرح</small></div><div class="tiny-stat"><b>ثبت</b><small>دفتر مالی</small></div></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="admin" data-search="داشبورد ادمین مدیر آمار کاربران محتوا پروژه ها admin dashboard">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۲</span><div class="feature-title"><h3>مرکز مدیریت سامانه</h3><p>فرمان محتوا، کاربران، پروژه‌ها و عملیات</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱ تا ۶</span><span class="badge">WS10</span><span class="badge done">تکمیل و مستقر</span><span class="badge route">/admin/</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«داشبورد ادمین می‌خواهم داشته باشد؛ مدیر بتواند راهکارهایی بدهد.»</div>
+              <ul class="does"><li>آمار والد، فرزند، نمای کودک، سنجش، پروژه، پیشنهاد و برنامه را یکجا نشان می‌دهد.</li><li>دسترسی مستقیم به درخت مسیر، فرم‌ساز، بامریند، شخصی‌سازی و مسیر آموزشی دارد.</li><li>کاربران جدید، وضعیت عملیات و کارتابل علمی را پایش می‌کند.</li></ul>
+              <div class="feature-footer"><span><b>نقش‌ها:</b> مدیر، والد، ناظر علمی مستقل</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>مرکز فرمان محتوا</b><span>مدیر</span></div><div class="screen-body"><div class="columns-3"><div class="tiny-stat"><b>۱۲۴</b><small>والد</small></div><div class="tiny-stat"><b>۱۸۹</b><small>فرزند</small></div><div class="tiny-stat"><b>۸۲</b><small>برنامه هفتگی</small></div></div><div class="columns-2"><div class="ui-card active"><div class="ui-row"><span class="avatar">⌁</span><div class="grow"><b>موتور شخصی‌سازی</b><small>قاعده، نسخه و انتشار</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">✓</span><div class="grow"><b>تأیید علمی</b><small>کارتابل ناظر</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">٪</span><div class="grow"><b>پروژه‌ها</b><small>بودجه و سهم‌ها</small></div></div></div><div class="ui-card"><div class="ui-row"><span class="avatar">◫</span><div class="grow"><b>عملیات</b><small>قیف و سلامت</small></div></div></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="admin" data-search="درخت مسیر ارتباط والد فرزند ادمین پاسخ درست اشتباه پیامد شاخه decision tree">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۳</span><div class="feature-title"><h3>درخت مسیر ارتباط</h3><p>ابزار پشت‌صحنه مدیر برای طراحی واکنش‌ها</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱ و ۳</span><span class="badge">WS7</span><span class="badge done">تکمیل پایه و قواعد پیشرفته</span><span class="badge route">/admin/tree</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«ابزاری می‌خواهم که ادمین درخت مسیر ارتباط را بگوید؛ در هر شرایط چه برخوردی باید کرد و برخورد اشتباه چه مشکلاتی می‌سازد.»</div>
+              <ul class="does"><li>مدیر برای هر موضوع پنج سطح شدت را ویرایش می‌کند.</li><li>پاسخ پیشنهادی، خطای رایج، پیامد و گزینه‌های انتخابی والد را می‌سازد.</li><li>در لایه پیشرفته، شرط نمای فرزند و نتیجه قبلی را به قاعده متصل می‌کند.</li></ul>
+              <div class="feature-footer"><span><b>توضیح صفحه ۱۰:</b> والد نمودار پیچیده نمی‌بیند؛ فقط روایت و قدم بعدی را می‌گیرد</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>درخت مسیر ارتباط</b><span>موضوع: خشم · شدت ۳</span></div><div class="screen-body"><div class="tree"><div class="tree-root">وقتی نوجوان با صدای بلند اعتراض می‌کند</div><div class="tree-branches"><div class="branch good"><small>شاخه پیشنهادی</small><b>مکث + همدلی + مرز</b><em style="color:var(--teal)">گفت‌وگوی امن‌تر</em></div><div class="branch bad"><small>شاخه اشتباه</small><b>تحقیر یا تهدید</b><em>تشدید خشم و فاصله</em></div></div></div><div class="ui-card"><div class="ui-title"><strong>شرط انتخاب</strong><small>اولویت ۹۰</small></div><div class="choice-row"><i class="on">فشار مستقیم</i><i>نتیجه قبلی بدتر</i><i>شدت ۳–۴</i></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="admin governance" data-search="فرم ساز گراویتی فرم سوال متن عدد انتخاب مقیاس dynamic form builder">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۴</span><div class="feature-title"><h3>فرم‌ساز پویا</h3><p>ساخت پرسش‌نامه بدون تغییر کد</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۱</span><span class="badge">WS8</span><span class="badge partial">نسخه پایه تکمیل</span><span class="badge route">/admin/forms</span></div>
+              <div class="quote"><b>درخواست پروپوزال</b>«فرم‌ساز شبیه Gravity Forms که مدیر طراحی کند.»</div>
+              <ul class="does"><li>مدیر فرم و فیلدهای متن، عدد، انتخاب و مقیاس می‌سازد.</li><li>فرم‌ها و پاسخ‌ها ساختاریافته ذخیره می‌شوند و توسعه‌پذیرند.</li><li>برای ورود ابزار بامریند، مسیر تخصصی JSON و کنترل علمی جدا ساخته شده است.</li></ul>
+              <div class="feature-footer"><span><b>موجود:</b> فیلدهای پایه</span><span><b>باقی:</b> منطق شرطی، پرش و فرمول امتیاز عمومی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>فرم‌ساز</b><span>فرم شناخت اولیه</span></div><div class="screen-body"><div class="form-field"><label>عنوان پرسش</label><div class="fake-input"></div></div><div class="columns-2"><div class="form-field"><label>نوع فیلد</label><div class="fake-input"></div></div><div class="form-field"><label>الزام پاسخ</label><div class="choice-row"><i class="on">بله</i><i>خیر</i></div></div></div><div class="ui-card active"><div class="ui-row"><span class="avatar">＋</span><div class="grow"><b>افزودن فیلد جدید</b><small>متن · عدد · انتخاب · مقیاس</small></div><span class="ui-btn">ذخیره</span></div></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="governance admin" data-search="ناظر علمی تایید محتوا نسخه snapshot hash بامریند review governance">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۵</span><div class="feature-title"><h3>گردش تأیید علمی</h3><p>انتشار محتوا با امضای مستقل ناظر</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۶</span><span class="badge">WS8</span><span class="badge done">تکمیل فنی</span><span class="badge route">/admin/scientific-review</span></div>
+              <div class="quote"><b>نیاز استنباط‌شده از پروپوزال</b>وقتی توصیه‌ها، پرسش‌نامه و مسیرهای تربیتی مبنای راهنمایی خانواده‌اند، نسخه علمی باید قابل کنترل و پاسخ‌گو باشد.</div>
+              <ul class="does"><li>مدیر نسخه محتوا را برای بررسی ارسال و ناظر مستقل تأیید یا رد می‌کند.</li><li>تأیید به اثرانگشت دقیق همان Snapshot متصل است.</li><li>هر تغییر، تأیید قبلی را بی‌اعتبار می‌کند تا محتوای ویرایش‌شده بی‌اجازه منتشر نشود.</li></ul>
+              <div class="feature-footer"><span><b>نقش:</b> reviewer مستقل</span><span><b>ثبت:</b> درخواست‌کننده، بازبین، زمان و رأی</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>کارتابل ناظر علمی</b><span>۳ مورد در انتظار</span></div><div class="screen-body"><div class="ui-card active"><div class="ui-title"><strong>قاعده خشم · نسخه ۴</strong><small>Snapshot: a91…e2</small></div><div class="choice-row"><i class="on">منبع ثبت شد</i><i>متن ایمنی</i><i>نسخه ثابت</i></div><div class="ui-row" style="margin-top:10px"><div class="grow"><small>ارسال‌کننده: مدیر محتوا</small></div><span class="ui-btn">تأیید</span><span class="ui-btn" style="background:var(--coral)">رد</span></div></div><div class="ui-card"><small style="font-size:.52rem;color:var(--muted)">هر ویرایش بعدی به بازبینی نسخه جدید نیاز دارد.</small></div></div></div>
+            </div></div>
+          </article>
+
+          <article class="feature" data-kind="governance admin organization" data-search="اثربخشی گزارش ناشناس حریم خصوصی حذف داده بکاپ سلامت readiness عملیات production">
+            <div class="feature-grid"><div class="feature-copy">
+              <div class="feature-top"><span class="feature-no">۱۶</span><div class="feature-title"><h3>اثربخشی، حریم خصوصی و عملیات</h3><p>اندازه‌گیری نتیجه بدون تبدیل‌شدن به ادعای درمان</p></div></div>
+              <div class="badges"><span class="badge stage">استیج ۶</span><span class="badge">WS10 و WS11</span><span class="badge done">تکمیل و مستقر</span><span class="badge route">/admin/operations · /dashboard/privacy</span></div>
+              <div class="quote"><b>نیاز تکمیلی محصول</b>مسیر آموزشی باید قابل پیگیری باشد، داده کودک حفاظت شود و پروژه سازمانی گزارش اثربخشی قابل اتکا داشته باشد.</div>
+              <ul class="does"><li>قیف ثبت‌نام تا تکمیل اولین هفته و نتیجه خودگزارشی اقدام‌ها را نشان می‌دهد.</li><li>گزارش سازمانی بدون نام و موبایل است و گروه کمتر از پنج نفر را مخفی می‌کند.</li><li>رضایت نسخه‌دار، درخواست حذف پرونده، بکاپ روزانه و مانور بازیابی دارد.</li></ul>
+              <div class="feature-footer"><span><b>زیرساخت:</b> Flask + SQLite + Gunicorn + systemd + Nginx</span><span><b>وضعیت:</b> Production فعال</span></div>
+            </div><div class="feature-visual">
+              <div class="screen"><div class="screen-head"><b>اثربخشی و عملیات</b><span>همه سامانه‌ها سالم</span></div><div class="screen-body"><div class="columns-3"><div class="tiny-stat"><b>۷۸٪</b><small>ساخت پرونده</small></div><div class="tiny-stat"><b>۵۶٪</b><small>شروع برنامه</small></div><div class="tiny-stat"><b>۳۹٪</b><small>تکمیل هفته</small></div></div><div class="chart"><i data-v="ثبت‌نام" style="height:100%"></i><i data-v="فرزند" style="height:78%"></i><i data-v="نمایه" style="height:66%"></i><i data-v="برنامه" style="height:56%"></i><i data-v="پایان" style="height:39%"></i></div><div class="ui-card active"><div class="ui-row"><span class="avatar">✓</span><div class="grow"><b>Readiness: سالم</b><small>دیتابیس، بکاپ و Health Timer فعال</small></div><span class="badge done">Online</span></div></div></div></div>
+            </div></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="matrix">
+      <div class="container">
+        <div class="section-head"><div><span class="eyebrow">ماتریس ردیابی</span><h2>جدول یک‌نگاه پروپوزال تا تحویل</h2></div><p>این جدول برای جلسه تحویل، گزارش پیشرفت یا تبدیل به PDF مناسب است.</p></div>
+        <div class="matrix-wrap"><table class="matrix"><thead><tr><th>نیاز پروپوزال</th><th>بخش سایت</th><th>نقش</th><th>استیج / WBS</th><th>وضعیت واقعی</th><th>نکته باقی‌مانده</th></tr></thead><tbody>
+          <tr><td>سایت تک‌صفحه‌ای والد‌پسند</td><td>لندینگ عمومی</td><td>همه</td><td>۱ / WS1</td><td><span class="state done">مستقر</span></td><td>تست تکمیلی دسترس‌پذیری موبایل</td></tr>
+          <tr><td>موبایل و رمز بدون کد تأیید</td><td>ثبت‌نام و ورود</td><td>والد</td><td>۱ / WS2</td><td><span class="state done">تکمیل</span></td><td>OTP عمداً در دامنه فعلی نیست</td></tr>
+          <tr><td>چند فرزند مجزا</td><td>پرونده و انتخاب‌گر فرزند</td><td>والد</td><td>۱–۲ / WS4</td><td><span class="state done">تکمیل</span></td><td>ویرایش/بایگانی پیشرفته بعدی</td></tr>
+          <tr><td>سنجش سبک والدگری</td><td>موتور بامریند</td><td>والد/ناظر</td><td>۲ / WS5</td><td><span class="state partial">فنی کامل</span></td><td>نسخه، ترجمه و مجوز علمی مصوب</td></tr>
+          <tr><td>شناخت متفاوت هر فرزند</td><td>نمای فرزند و فرم رابطه</td><td>والد</td><td>۲ / WS4</td><td><span class="state done">تکمیل</span></td><td>ابزار دوم پس از پایلوت</td></tr>
+          <tr><td>توصیه متفاوت برای زهرا و علی</td><td>موتور شخصی‌سازی</td><td>والد/مدیر</td><td>۳ / WS7</td><td><span class="state done">تکمیل</span></td><td>بازبینی علمی قواعد پایلوت</td></tr>
+          <tr><td>مهارت‌های دسته‌بندی‌شده</td><td>مهارت‌ها و ریزدرس‌ها</td><td>والد/مدیر</td><td>۴ / WS6</td><td><span class="state partial">پایلوت</span></td><td>۱۴ مهارت از نقشه ۲۰تایی</td></tr>
+          <tr><td>۲۵ موقعیت × ۵ شدت</td><td>سناریو و درخت مسیر</td><td>والد/مدیر</td><td>۱–۴ / WS7</td><td><span class="state partial">۵ موضوع فعال</span></td><td>۲۰ موضوع باقی‌مانده، موجی</td></tr>
+          <tr><td>مسیر منسجم آموزشی</td><td>برنامه هفتگی و اقدام امروز</td><td>والد</td><td>۴ / WS9</td><td><span class="state done">تکمیل فنی</span></td><td>گسترش محتوای تأییدشده</td></tr>
+          <tr><td>ارزش افزوده نسبت به AI عمومی</td><td>همراه منبع‌دار و کنترل‌شده</td><td>والد/مدیر</td><td>۵ / WS9</td><td><span class="state done">هسته فعال</span></td><td>مدل بیرونی اختیاری، نه ضروری</td></tr>
+          <tr><td>حمایت سازمانی ۷۰/۳۰</td><td>پروژه، کد و دفتر مالی</td><td>والد/مدیر</td><td>۱.۵ / WS3</td><td><span class="state done">تکمیل</span></td><td>درگاه واقعی پس از قرارداد PSP</td></tr>
+          <tr><td>فرم‌ساز شبیه Gravity</td><td>فرم‌ساز مدیر</td><td>مدیر</td><td>۱ / WS8</td><td><span class="state partial">نسخه پایه</span></td><td>منطق شرطی و فرمول عمومی</td></tr>
+          <tr><td>پنل مدیر و کنترل محتوا</td><td>مرکز مدیریت و تأیید علمی</td><td>مدیر/ناظر</td><td>۱–۶</td><td><span class="state done">مستقر</span></td><td>ورود محتوای نهایی متخصص</td></tr>
+          <tr><td>حریم خصوصی و گزارش اثر</td><td>عملیات و مرکز حریم خصوصی</td><td>والد/مدیر</td><td>۶ / WS10–11</td><td><span class="state done">تکمیل</span></td><td>پایش پایلوت واقعی</td></tr>
+        </tbody></table></div>
+      </div>
+    </section>
+
+    <section class="section" id="remaining">
+      <div class="container">
+        <div class="section-head"><div><span class="eyebrow">مرزبندی شفاف</span><h2>چه چیزهایی هنوز تحویل علمی یا تجاری می‌خواهند؟</h2></div><p>تکمیل فنی با تکمیل محتوایی یا اتصال سرویس بیرونی یکسان نیست. این موارد عمداً به‌عنوان «کامل» گزارش نمی‌شوند.</p></div>
+        <div class="remaining">
+          <article class="remaining-card"><span>وابستگی علمی</span><h3>نسخه مصوب بامریند</h3><p>منبع دقیق، ترجمه، مجوز استفاده، متن سؤال‌ها، فرمول و حدود تفسیر باید توسط مسئول علمی تحویل و در پنل منتشر شود.</p></article>
+          <article class="remaining-card"><span>تولید محتوا</span><h3>تکمیل ۲۵ موضوع و ۲۰ مهارت</h3><p>پنج موضوع و شش مهارت پایلوت فعال‌اند. ۲۰ موضوع و ۱۴ مهارت بعدی باید موجی تولید، بازبینی و نسخه‌بندی شوند.</p></article>
+          <article class="remaining-card"><span>وابستگی بیرونی</span><h3>درگاه پرداخت واقعی</h3><p>مدل ۷۰/۳۰ و دفتر مالی آماده است؛ اتصال پرداخت آنلاین به انتخاب PSP، قرارداد و Credential پذیرنده وابسته است.</p></article>
+          <article class="remaining-card"><span>توسعه بعدی</span><h3>فرم‌ساز شرطی پیشرفته</h3><p>فیلدهای پایه فعال‌اند. نمایش شرطی، پرش بین سؤال‌ها و فرمول امتیاز عمومی در موج بعدی فرم‌ساز قرار دارد.</p></article>
+          <article class="remaining-card"><span>تصمیم محصول</span><h3>بازیابی رمز و OTP</h3><p>مطابق درخواست، ثبت‌نام بدون OTP است. بازیابی خودکار رمز تا انتخاب پیامک یا فرآیند پشتیبانی قابل اعتماد فعال نمی‌شود.</p></article>
+          <article class="remaining-card"><span>پایلوت</span><h3>آزمون با خانواده و سازمان واقعی</h3><p>پس از ساخت حساب مدیر، یک پایلوت ۱۰ خانواده‌ای برای اصلاح متن، سنجش نرخ تکمیل و تطبیق گزارش مالی پیشنهاد شده است.</p></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-grid"><div><h2>والدیار؛ راهنمای پیوسته، نه مجموعه‌ای از ابزارهای پراکنده</h2><p>این سند بر اساس پروپوزال، الحاقیه رسمی نیازمندی‌ها، WBS نسخه ۲ و قابلیت‌های موجود در نسخه مستقر تهیه شده است. محتوای علمی نمونه باید پیش از انتشار عمومی توسط مسئول علمی بازبینی شود.</p></div><div class="footer-meta">آخرین تطبیق: ۸ آبان ۱۴۰۵ · ۳۰ اکتبر ۲۰۲۶<b>srun.ir/valedgari</b></div></div>
+  </footer>
+  <button class="backtop" id="backtop" aria-label="بازگشت به بالا">↑</button>
+
+  <script>
+    const features=[...document.querySelectorAll('.feature')];
+    const filters=[...document.querySelectorAll('.filter')];
+    const search=document.getElementById('searchInput');
+    const empty=document.getElementById('emptySearch');
+    let activeFilter='all';
+    function normalize(v){return (v||'').toLowerCase().replace(/[يى]/g,'ی').replace(/ك/g,'ک').trim()}
+    function applyFilters(){
+      const q=normalize(search.value);let count=0;
+      features.forEach(card=>{const kinds=(card.dataset.kind||'').split(' ');const hay=normalize(card.textContent+' '+(card.dataset.search||''));const visible=(activeFilter==='all'||kinds.includes(activeFilter))&&(!q||hay.includes(q));card.hidden=!visible;if(visible)count++});
+      empty.style.display=count?'none':'block';
+    }
+    filters.forEach(btn=>btn.addEventListener('click',()=>{filters.forEach(x=>x.classList.remove('active'));btn.classList.add('active');activeFilter=btn.dataset.filter;applyFilters()}));
+    search.addEventListener('input',applyFilters);
+    document.getElementById('expandAll').addEventListener('click',()=>{activeFilter='all';search.value='';filters.forEach(x=>x.classList.toggle('active',x.dataset.filter==='all'));applyFilters();document.getElementById('features').scrollIntoView()});
+    const topBtn=document.getElementById('backtop');window.addEventListener('scroll',()=>topBtn.classList.toggle('show',window.scrollY>700));topBtn.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
+  </script>
+</body>
+</html>
