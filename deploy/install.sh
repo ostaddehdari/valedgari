@@ -110,7 +110,8 @@ set +a
 HAS_USERS="$(sqlite3 "${APP_DIR}/instance/valedgari.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users';" 2>/dev/null || echo 0)"
 HAS_ALEMBIC="$(sqlite3 "${APP_DIR}/instance/valedgari.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='alembic_version';" 2>/dev/null || echo 0)"
 if [[ "${HAS_USERS}" == "1" && "${HAS_ALEMBIC}" == "0" ]]; then
-  runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app db stamp 08de7b3ceefe
+  runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app upgrade-legacy-stage6
+  runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app db stamp head
 fi
 runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app db upgrade
 runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app migrate-stage15-data

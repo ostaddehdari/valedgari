@@ -176,6 +176,14 @@ def create_app(config_object=None):
         result = migrate_stage15_data(actor.id if actor else None)
         click.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
+    @app.cli.command("upgrade-legacy-stage6")
+    def upgrade_legacy_stage6_command():
+        """Safely bridge an unversioned Stage 6 SQLite database to Stage 15."""
+        from .legacy_upgrade import upgrade_legacy_stage6_schema
+
+        result = upgrade_legacy_stage6_schema(db.engine, db.metadata)
+        click.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
     @app.cli.command("process-jobs")
     @click.option("--limit", default=50, type=click.IntRange(1, 500))
     def process_background_jobs(limit):

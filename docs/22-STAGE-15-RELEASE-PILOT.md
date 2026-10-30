@@ -30,10 +30,11 @@ unset PILOT_DEFAULT_PASSWORD
 ## عملیات انتشار
 
 1. backup سازگار SQLite و رمزگذاری AES-256 ایجاد می‌شود.
-2. وابستگی‌ها نصب و Migration اجرا می‌شود.
-3. داده قدیمی پروفایل بدون overwrite مقدار جدید منتقل می‌شود.
-4. در صورت فعال بودن `VALEDGARI_SEED_PILOT=1`، پایلوت همگام می‌شود.
-5. سرویس restart و `/health/release` بررسی می‌شود.
+2. دیتابیس بدون Migration استیج ۶ با افزودن ستون‌ها و جدول‌های غایب، بدون حذف داده reconcile می‌شود.
+3. وابستگی‌ها نصب و Migration اجرا می‌شود.
+4. داده قدیمی پروفایل و پروژه‌های سازمانی بدون overwrite منتقل می‌شود.
+5. در صورت فعال بودن `VALEDGARI_SEED_PILOT=1`، پایلوت همگام می‌شود.
+6. سرویس restart و `/health/release` بررسی می‌شود.
 
 ```bash
 VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
@@ -50,6 +51,7 @@ VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 - صف idempotent برای گزارش قرارداد، Import، اعلان و اسکن فایل
 - timer یک‌دقیقه‌ای صف، backup روزانه و restore drill هفتگی
 - Migration تازه‌نصب و مسیر upgrade دیتابیس موجود
+- پل یک‌باره و idempotent برای ارتقای مستقیم SQLite استیج ۶ و حفظ داده‌های قبلی
 - smoke test مستقل دیتابیس، revision و شکست‌های terminal صف
 
 فعال‌سازی درگاه واقعی، پیامک واقعی و محتوای علمی استاندارد همچنان به Credential و تأیید تخصصی جداگانه نیاز دارد.

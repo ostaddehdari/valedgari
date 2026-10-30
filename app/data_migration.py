@@ -3,7 +3,13 @@
 import json
 
 from .extensions import db
-from .models import FormAssignment, Organization, ProfileRecord
+from .models import (
+    FormAssignment,
+    Organization,
+    OrganizationContract,
+    ProfileRecord,
+    SponsoredProject,
+)
 from .profiles import active_profile_definition, sync_role_form_to_profile
 
 
@@ -11,6 +17,35 @@ def migrate_stage15_data(actor_id=None):
     """Move legacy role forms and organization profile JSON into unified profiles."""
     bindings_created = 0
     records_migrated = 0
+    legacy_contracts_created = 0
+
+    legacy_projects = SponsoredProject.query.filter_by(contract_id=None).all()
+    if legacy_projects and not actor_id:
+        raise RuntimeError("برای انتقال پروژه‌های قدیمی، وجود حساب مدیر الزامی است.")
+    for organization in Organization.query.order_by(Organization.id).all():
+        projects = [item for item in legacy_projects if item.organization_id == organization.id]
+        if not projects:
+            continue
+        contract_no = f"LEGACY-ORG-{organization.id:05d}"
+        contract = OrganizationContract.query.filter_by(contract_no=contract_no).first()
+        if not contract:
+            contract = OrganizationContract(
+                organization_id=organization.id,
+                contract_no=contract_no,
+                title=f"قرارداد انتقالی {organization.name}",
+                status="active" if any(item.status == "active" for item in projects) else "draft",
+                services_json=json.dumps(
+                    sorted({service for item in projects for service in item.eligible_services}),
+                    ensure_ascii=False,
+                ),
+                terms_text="این قرارداد به‌صورت خودکار از پروژه‌های سازمانی پیش از استیج ۱۵ ساخته شده است.",
+                created_by=actor_id,
+            )
+            db.session.add(contract)
+            db.session.flush()
+            legacy_contracts_created += 1
+        for project in projects:
+            project.contract_id = contract.id
 
     role_assignments = FormAssignment.query.filter_by(
         target_type="role", status="active"
@@ -65,4 +100,6 @@ def migrate_stage15_data(actor_id=None):
         "role_assignments_checked": len(role_assignments),
         "bindings_created": bindings_created,
         "organization_records_migrated": records_migrated,
+        "legacy_contracts_created": legacy_contracts_created,
+        "legacy_projects_attached": len(legacy_projects),
     }

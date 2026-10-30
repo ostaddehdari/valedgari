@@ -2805,6 +2805,15 @@ def test_stage15_legacy_organization_profile_migration_is_idempotent(app):
             profile_data_json=json.dumps({"legacy_goal": "حفظ داده قبلی"}, ensure_ascii=False),
         )
         db.session.add_all([form, organization])
+        db.session.flush()
+        project = SponsoredProject(
+            organization_id=organization.id,
+            name="طرح حمایتی قدیمی",
+            code="LEGACY-STAGE15",
+            status="active",
+            created_by=admin.id,
+        )
+        db.session.add(project)
         db.session.commit()
         migrate_stage15_data(admin.id)
         migrate_stage15_data(admin.id)
@@ -2815,6 +2824,11 @@ def test_stage15_legacy_organization_profile_migration_is_idempotent(app):
         assert list(record.values.values()) == ["حفظ داده قبلی"]
         assert ProfileFormBinding.query.filter_by(
             definition_id=definition.id, form_id=form.id
+        ).count() == 1
+        assert project.contract is not None
+        assert project.contract.contract_no == f"LEGACY-ORG-{organization.id:05d}"
+        assert OrganizationContract.query.filter_by(
+            contract_no=project.contract.contract_no
         ).count() == 1
 
 
@@ -2884,4 +2898,74 @@ def test_stage15_admin_directory_is_paginated(client, app):
     response = client.get("/admin/users")
     assert response.status_code == 200
     assert "والدین: صفحه 1 از" in response.get_data(as_text=True)
+
+
+def test_stage15_upgrades_unversioned_stage6_schema_without_losing_rows():
+    from sqlalchemy import create_engine, inspect, text
+
+    from app import create_app
+    from app.extensions import db as application_db
+    from app.legacy_upgrade import upgrade_legacy_stage6_schema
+    from config import TestConfig
+
+    engine = create_engine("sqlite:///:memory:")
+    stage6_tables = [
+        """CREATE TABLE users (
+            id INTEGER PRIMARY KEY, mobile VARCHAR(11) NOT NULL,
+            full_name VARCHAR(120) NOT NULL, password_hash VARCHAR(255) NOT NULL,
+            role VARCHAR(20) NOT NULL, is_active_account BOOLEAN NOT NULL,
+            created_at DATETIME NOT NULL)""",
+        """CREATE TABLE children (
+            id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, name VARCHAR(80) NOT NULL,
+            birth_year INTEGER NOT NULL, gender VARCHAR(20) NOT NULL,
+            notes VARCHAR(500) NOT NULL, created_at DATETIME NOT NULL)""",
+        """CREATE TABLE skill_modules (
+            id INTEGER PRIMARY KEY, slug VARCHAR(80) NOT NULL, title VARCHAR(120) NOT NULL,
+            description VARCHAR(500) NOT NULL, icon VARCHAR(60) NOT NULL,
+            duration INTEGER NOT NULL, sort_order INTEGER NOT NULL,
+            is_published BOOLEAN NOT NULL)""",
+        """CREATE TABLE dynamic_forms (
+            id INTEGER PRIMARY KEY, title VARCHAR(160) NOT NULL, slug VARCHAR(100) NOT NULL,
+            description VARCHAR(500) NOT NULL, status VARCHAR(20) NOT NULL,
+            schema_json TEXT NOT NULL, created_by INTEGER NOT NULL,
+            created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)""",
+        """CREATE TABLE form_responses (
+            id INTEGER PRIMARY KEY, form_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+            child_id INTEGER, answers_json TEXT NOT NULL, created_at DATETIME NOT NULL)""",
+        """CREATE TABLE organizations (
+            id INTEGER PRIMARY KEY, name VARCHAR(160) NOT NULL,
+            legal_name VARCHAR(200) NOT NULL, registration_no VARCHAR(80) NOT NULL,
+            contact_name VARCHAR(120) NOT NULL, contact_mobile VARCHAR(20) NOT NULL,
+            status VARCHAR(20) NOT NULL, created_at DATETIME NOT NULL)""",
+        """CREATE TABLE sponsored_projects (
+            id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL,
+            name VARCHAR(180) NOT NULL, code VARCHAR(32) NOT NULL,
+            status VARCHAR(20) NOT NULL)""",
+    ]
+    with engine.begin() as connection:
+        for statement in stage6_tables:
+            connection.exec_driver_sql(statement)
+        connection.exec_driver_sql(
+            "INSERT INTO users VALUES "
+            "(1, '09120000000', 'مدیر قدیمی', 'hash', 'admin', 1, '2026-01-01')"
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO skill_modules VALUES "
+            "(1, 'legacy-skill', 'مهارت قدیمی', '', '', 10, 1, 1)"
+        )
+
+    app = create_app(TestConfig)
+    with app.app_context():
+        result = upgrade_legacy_stage6_schema(engine, application_db.metadata)
+
+    table_names = set(inspect(engine).get_table_names())
+    skill_columns = {item["name"] for item in inspect(engine).get_columns("skill_modules")}
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT title FROM skill_modules WHERE id=1")).scalar() == "مهارت قدیمی"
+        assert connection.execute(text("SELECT full_name FROM users WHERE id=1")).scalar() == "مدیر قدیمی"
+    assert result["integrity"] == "ok"
+    assert result["columns_added"] == 31
+    assert "background_jobs" in table_names
+    assert "organization_contracts" in table_names
+    assert {"code", "level", "style_tags_json"}.issubset(skill_columns)
 

@@ -12,6 +12,15 @@ set +a
 cd "${APP_DIR}"
 RUN_APP=(runuser -u www-data --preserve-environment --)
 
+if [[ "${APP_VERSION:-}" != "stage-15" ]]; then
+  echo "APP_VERSION باید در ${ENV_FILE} برابر stage-15 باشد." >&2
+  exit 2
+fi
+if [[ "${AUTO_CREATE_SCHEMA:-}" != "0" ]]; then
+  echo "AUTO_CREATE_SCHEMA باید در ${ENV_FILE} برابر 0 باشد." >&2
+  exit 2
+fi
+
 if [[ -f "${DB_FILE}" ]]; then
   "${APP_DIR}/deploy/backup-db.sh"
 fi
@@ -20,7 +29,8 @@ fi
 HAS_USERS="$(sqlite3 "${DB_FILE}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users';" 2>/dev/null || echo 0)"
 HAS_ALEMBIC="$(sqlite3 "${DB_FILE}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='alembic_version';" 2>/dev/null || echo 0)"
 if [[ "${HAS_USERS}" == "1" && "${HAS_ALEMBIC}" == "0" ]]; then
-  "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app db stamp 08de7b3ceefe
+  "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app upgrade-legacy-stage6
+  "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app db stamp head
 fi
 "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app db upgrade
 "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app migrate-stage15-data
