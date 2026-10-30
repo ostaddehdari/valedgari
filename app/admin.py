@@ -1,10 +1,11 @@
 import csv
 import io
 import json
+import os
 import re
-from datetime import date
+from datetime import date, datetime
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import or_
 
@@ -23,7 +24,10 @@ from .models import (
     DailyAction,
     DecisionNode,
     DynamicForm,
+    FormAssignment,
+    FormMediaAsset,
     FormResponse,
+    FormVersion,
     GuardianRelationship,
     Organization,
     OrganizationAuditLog,
@@ -70,6 +74,21 @@ from .profiles import (
     profile_record,
     profile_sections,
     save_profile_values,
+)
+from .form_engine import (
+    AI_CONTRACT,
+    FORM_STATUSES,
+    FORM_TYPES,
+    UPLOAD_TYPES,
+    allowed_upload,
+    field_catalog_payload,
+    form_to_ai_contract,
+    normalize_schema,
+    normalize_scoring,
+    normalize_settings,
+    score_answers,
+    storage_filename,
+    validate_ai_contract,
 )
 
 
@@ -451,6 +470,7 @@ def scientific_review():
         "lesson": MicroLesson.query.order_by(MicroLesson.id.desc()).all(),
         "rule": PersonalizationRule.query.order_by(PersonalizationRule.id.desc()).all(),
         "protocol": SafetyProtocol.query.order_by(SafetyProtocol.id.desc()).all(),
+        "form": DynamicForm.query.filter_by(status="review").order_by(DynamicForm.id.desc()).all(),
     }
     return render_template("admin/scientific_review.html", reviews=reviews, resources=resources)
 
@@ -2047,41 +2067,472 @@ def tree_builder():
     )
 
 
+def form_snapshot_hash(form):
+    return ScientificReview.fingerprint(resource_snapshot("form", form))
+
+
+def save_form_snapshot(form):
+    snapshot_hash = form_snapshot_hash(form)
+    snapshot = FormVersion.query.filter_by(form_id=form.id, version=form.version).first()
+    if not snapshot:
+        snapshot = FormVersion(
+            form_id=form.id,
+            version=form.version,
+            created_by=current_user.id,
+            title=form.title,
+            snapshot_hash=snapshot_hash,
+        )
+        db.session.add(snapshot)
+    snapshot.title = form.title
+    snapshot.schema_json = form.schema_json
+    snapshot.settings_json = form.settings_json
+    snapshot.scoring_json = form.scoring_json
+    snapshot.snapshot_hash = snapshot_hash
+    return snapshot
+
+
+def parse_datetime_local(value):
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def unique_form_slug(value, exclude_id=None):
+    base = make_slug(value)[:100]
+    candidate = base
+    counter = 2
+    while DynamicForm.query.filter(
+        DynamicForm.slug == candidate,
+        DynamicForm.id != (exclude_id or -1),
+    ).first():
+        suffix = f"-{counter}"
+        candidate = f"{base[:100-len(suffix)]}{suffix}"
+        counter += 1
+    return candidate
+
+
+def create_scientific_form_review(form):
+    fingerprint = form_snapshot_hash(form)
+    review = ScientificReview.query.filter_by(
+        resource_type="form",
+        resource_id=form.id,
+        resource_version=str(form.version),
+        snapshot_hash=fingerprint,
+    ).first()
+    if not review:
+        review = ScientificReview(
+            resource_type="form",
+            resource_id=form.id,
+            resource_title=form.title,
+            resource_version=str(form.version),
+            snapshot_hash=fingerprint,
+            requested_by=current_user.id,
+        )
+        db.session.add(review)
+    else:
+        review.status = "pending"
+        review.requested_by = current_user.id
+        review.requested_at = utcnow()
+        review.reviewed_by = None
+        review.reviewed_at = None
+        review.reviewer_note = ""
+    return review
+
+
 @bp.route("/forms", methods=["GET", "POST"])
 @login_required
 @admin_required
 def form_builder():
     if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        slug = make_slug(request.form.get("slug"))
+        action = request.form.get("action")
+        form = db.session.get(DynamicForm, request.form.get("form_id", type=int))
+        if not form:
+            abort(404)
+        if action == "archive":
+            form.status = "archived"
+            form.archived_at = utcnow()
+            save_form_snapshot(form)
+            db.session.commit()
+            flash("فرم بایگانی شد و پاسخ‌های قبلی محفوظ ماندند.", "info")
+        elif action == "duplicate":
+            clone = DynamicForm(
+                title=f"کپی {form.title}",
+                slug=unique_form_slug(f"{form.slug}-copy"),
+                description=form.description,
+                form_type=form.form_type,
+                use_case=form.use_case,
+                version=1,
+                status="draft",
+                schema_json=form.schema_json,
+                settings_json=form.settings_json,
+                scoring_json=form.scoring_json,
+                created_by=current_user.id,
+            )
+            db.session.add(clone)
+            db.session.flush()
+            save_form_snapshot(clone)
+            db.session.commit()
+            flash("یک کپی Draft از فرم ساخته شد.", "success")
+            return redirect(url_for("admin.form_editor", form_id=clone.id))
+        return redirect(url_for("admin.form_builder"))
+
+    query = DynamicForm.query
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    form_type = request.args.get("type", "").strip()
+    if search:
+        query = query.filter(
+            or_(DynamicForm.title.contains(search), DynamicForm.slug.contains(search))
+        )
+    if status in FORM_STATUSES:
+        query = query.filter_by(status=status)
+    if form_type in FORM_TYPES:
+        query = query.filter_by(form_type=form_type)
+    forms = query.order_by(DynamicForm.updated_at.desc(), DynamicForm.id.desc()).all()
+    stats = {
+        "all": DynamicForm.query.count(),
+        "published": DynamicForm.query.filter_by(status="published").count(),
+        "review": DynamicForm.query.filter_by(status="review").count(),
+        "responses": FormResponse.query.filter_by(status="submitted").count(),
+    }
+    return render_template(
+        "admin/forms.html",
+        forms=forms,
+        stats=stats,
+        search=search,
+        selected_status=status,
+        selected_type=form_type,
+        form_types=FORM_TYPES,
+        ai_contract=AI_CONTRACT,
+    )
+
+
+@bp.route("/forms/new", methods=["GET", "POST"])
+@bp.route("/forms/<int:form_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def form_editor(form_id=None):
+    form = db.get_or_404(DynamicForm, form_id) if form_id else None
+    if request.method == "POST":
+        action = request.form.get("action", "save_draft")
+        title = request.form.get("title", "").strip()[:160]
+        slug = make_slug(request.form.get("slug"))[:100]
         try:
-            fields = json.loads(request.form.get("schema_json", "[]"))
+            raw_fields = json.loads(request.form.get("schema_json", "[]"))
         except ValueError:
-            fields = []
-        allowed = {"text", "textarea", "number", "radio", "select", "scale"}
-        fields = [field for field in fields if field.get("type") in allowed and field.get("label")]
-        form_id = request.form.get("form_id", type=int)
-        form = db.session.get(DynamicForm, form_id) if form_id else None
-        duplicate = DynamicForm.query.filter_by(slug=slug).first()
-        if duplicate and duplicate.id != form_id:
-            flash("این نامک قبلاً استفاده شده است.", "danger")
-        elif not title or not fields:
-            flash("عنوان و دست‌کم یک فیلد لازم است.", "danger")
+            raw_fields = []
+        fields, errors = normalize_schema(raw_fields)
+        try:
+            raw_settings = json.loads(request.form.get("settings_json", "{}"))
+        except ValueError:
+            raw_settings = {}
+            errors.append("settings: JSON تنظیمات معتبر نیست.")
+        try:
+            raw_scoring = json.loads(request.form.get("scoring_json", "{}"))
+        except ValueError:
+            raw_scoring = {}
+            errors.append("scoring: JSON امتیازدهی معتبر نیست.")
+        settings = normalize_settings(raw_settings)
+        scoring, scoring_errors = normalize_scoring(raw_scoring)
+        errors.extend(scoring_errors)
+        form_type = request.form.get("form_type", "assessment")
+        if form_type not in FORM_TYPES:
+            errors.append("نوع فرم معتبر نیست.")
+        duplicate = DynamicForm.query.filter(
+            DynamicForm.slug == slug,
+            DynamicForm.id != (form.id if form else -1),
+        ).first()
+        if len(title) < 3:
+            errors.append("عنوان فرم باید حداقل سه نویسه باشد.")
+        if duplicate:
+            errors.append("نامک فرم قبلاً استفاده شده است.")
+        if action not in {"save_draft", "request_review", "publish"}:
+            abort(400)
+        if action == "publish":
+            if not form:
+                errors.append("ابتدا فرم را ذخیره و برای تأیید علمی ارسال کنید.")
+            else:
+                candidate_matches_approved_snapshot = (
+                    title == form.title
+                    and slug == form.slug
+                    and request.form.get("description", "").strip()[:500] == form.description
+                    and form_type == form.form_type
+                    and (request.form.get("use_case", "general").strip()[:80] or "general") == form.use_case
+                    and fields == form.fields
+                    and settings == form.settings
+                    and scoring == form.scoring
+                )
+                if not candidate_matches_approved_snapshot:
+                    errors.append(
+                        "محتوا پس از تأیید تغییر کرده است؛ ابتدا نسخه جدید را ذخیره و دوباره برای تأیید علمی ارسال کنید."
+                    )
+                elif not approved_for_current_snapshot("form", form):
+                    errors.append("انتشار فقط پس از تأیید علمی مستقل همین نسخه و اثرانگشت ممکن است.")
+        if errors:
+            for error in errors:
+                flash(error, "danger")
         else:
             if not form:
-                form = DynamicForm(created_by=current_user.id)
+                form = DynamicForm(created_by=current_user.id, version=1)
                 db.session.add(form)
+            elif form.status in {"published", "archived"} and action != "publish":
+                form.version += 1
+                form.published_at = None
+                form.archived_at = None
             form.title = title
             form.slug = slug
-            form.description = request.form.get("description", "").strip()
-            form.status = request.form.get("status", "draft")
+            form.description = request.form.get("description", "").strip()[:500]
+            form.form_type = form_type
+            form.use_case = request.form.get("use_case", "general").strip()[:80] or "general"
             form.schema_json = json.dumps(fields, ensure_ascii=False)
+            form.settings_json = json.dumps(settings, ensure_ascii=False)
+            form.scoring_json = json.dumps(scoring, ensure_ascii=False)
+            if action == "request_review":
+                form.status = "review"
+            elif action == "publish":
+                form.status = "published"
+                form.published_at = utcnow()
+            else:
+                form.status = "draft"
+            db.session.flush()
+            save_form_snapshot(form)
+            if action == "request_review":
+                create_scientific_form_review(form)
             db.session.commit()
-            flash("فرم و ساختار فیلدها ذخیره شد.", "success")
-            return redirect(url_for("admin.form_builder", form_id=form.id))
+            message = {
+                "save_draft": f"پیش‌نویس نسخه {form.version} ذخیره شد.",
+                "request_review": f"نسخه {form.version} برای تأیید علمی ارسال شد.",
+                "publish": f"نسخه {form.version} فرم منتشر شد.",
+            }[action]
+            flash(message, "success")
+            return redirect(url_for("admin.form_editor", form_id=form.id))
 
-    forms = DynamicForm.query.order_by(DynamicForm.created_at.desc()).all()
-    form_id = request.args.get("form_id", type=int)
-    selected = db.session.get(DynamicForm, form_id) if form_id else None
-    return render_template("admin/form_builder.html", forms=forms, selected=selected)
+    return render_template(
+        "admin/form_builder.html",
+        selected=form,
+        catalog=field_catalog_payload(),
+        form_types=FORM_TYPES,
+        ai_contract=AI_CONTRACT,
+        approved=approved_for_current_snapshot("form", form) if form else None,
+    )
+
+
+@bp.post("/forms/import")
+@login_required
+@admin_required
+def form_import_json():
+    try:
+        payload = json.loads(request.form.get("json_payload", ""))
+    except ValueError as exc:
+        flash(f"$: JSON معتبر نیست؛ {exc.msg} در خط {exc.lineno}.", "danger")
+        return redirect(url_for("admin.form_builder"))
+    normalized, errors = validate_ai_contract(payload)
+    if errors:
+        for error in errors[:30]:
+            flash(error, "danger")
+        if len(errors) > 30:
+            flash(f"{len(errors) - 30} خطای دیگر نیز وجود دارد.", "danger")
+        return redirect(url_for("admin.form_builder"))
+    form = DynamicForm(
+        title=normalized["title"],
+        slug=unique_form_slug(normalized["slug"]),
+        description=normalized["description"],
+        form_type=normalized["form_type"],
+        use_case=normalized["use_case"],
+        version=1,
+        status="draft",
+        schema_json=json.dumps(normalized["fields"], ensure_ascii=False),
+        settings_json=json.dumps(normalized["settings"], ensure_ascii=False),
+        scoring_json=json.dumps(normalized["scoring"], ensure_ascii=False),
+        created_by=current_user.id,
+    )
+    db.session.add(form)
+    db.session.flush()
+    save_form_snapshot(form)
+    db.session.commit()
+    flash("JSON معتبر بود و فقط به‌صورت Draft ساخته شد؛ برای انتشار باید بازبینی شود.", "success")
+    return redirect(url_for("admin.form_editor", form_id=form.id))
+
+
+@bp.get("/forms/<int:form_id>/export.json")
+@login_required
+@admin_required
+def form_export_json(form_id):
+    form = db.get_or_404(DynamicForm, form_id)
+    body = json.dumps(form_to_ai_contract(form), ensure_ascii=False, indent=2)
+    return Response(
+        body,
+        mimetype="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{form.slug}-v{form.version}.json"'},
+    )
+
+
+@bp.post("/forms/<int:form_id>/assignments")
+@login_required
+@admin_required
+def form_assignment(form_id):
+    form = db.get_or_404(DynamicForm, form_id)
+    if form.status != "published":
+        flash("فقط فرم منتشرشده قابل تخصیص است.", "danger")
+        return redirect(url_for("admin.form_responses", form_id=form.id))
+    target_type = request.form.get("target_type", "role")
+    if target_type not in {"role", "user", "child", "course", "journey"}:
+        abort(400)
+    target_id = request.form.get("target_id", type=int) if target_type in {"user", "child"} else None
+    target_ref = request.form.get("target_ref", "").strip()[:120]
+    if target_type == "role":
+        target_ref = target_ref if target_ref in {"parent", "admin", "reviewer"} else "parent"
+    if target_type == "user" and not db.session.get(User, target_id):
+        flash("کاربر هدف پیدا نشد.", "danger")
+    elif target_type == "child" and not db.session.get(Child, target_id):
+        flash("فرزند هدف پیدا نشد.", "danger")
+    elif target_type in {"course", "journey"} and not target_ref:
+        flash("شناسه دوره یا مرحله مسیر را وارد کنید.", "danger")
+    else:
+        assignment = FormAssignment(
+            form_id=form.id,
+            target_type=target_type,
+            target_id=target_id,
+            target_ref=target_ref,
+            title=request.form.get("title", "").strip()[:180] or form.title,
+            status="active",
+            is_required=request.form.get("is_required") == "1",
+            opens_at=parse_datetime_local(request.form.get("opens_at")),
+            due_at=parse_datetime_local(request.form.get("due_at")),
+            created_by=current_user.id,
+        )
+        db.session.add(assignment)
+        db.session.commit()
+        flash("فرم به مخاطب انتخاب‌شده تخصیص یافت.", "success")
+    return redirect(url_for("admin.form_responses", form_id=form.id))
+
+
+@bp.post("/forms/<int:form_id>/media")
+@login_required
+@admin_required
+def form_media_upload(form_id):
+    form = db.get_or_404(DynamicForm, form_id)
+    upload = request.files.get("media")
+    field_key = request.form.get("field_key", "").strip()[:80]
+    kind = request.form.get("kind", "file")
+    field = next((item for item in form.fields if item.get("key") == field_key), None)
+    if not upload or not upload.filename:
+        flash("فایل انتخاب نشده است.", "danger")
+    else:
+        if not field:
+            field = {"type": {"image": "image_answer", "video": "video_answer", "audio": "audio_answer"}.get(kind, "file"), "validation": {"max_size_mb": 8}}
+        upload.stream.seek(0, os.SEEK_END)
+        size_bytes = upload.stream.tell()
+        upload.stream.seek(0)
+        header_bytes = upload.stream.read(32)
+        upload.stream.seek(0)
+        allowed, result = allowed_upload(
+            field, upload.filename, upload.mimetype, size_bytes, header_bytes
+        )
+        if not allowed:
+            flash(result, "danger")
+        else:
+            storage_name = storage_filename(result)
+            folder = os.path.join(current_app.instance_path, "form_uploads")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            upload.save(os.path.join(folder, storage_name))
+            asset = FormMediaAsset(
+                form_id=form.id,
+                owner_id=current_user.id,
+                field_key=field_key,
+                kind=kind,
+                original_name=upload.filename[:240],
+                storage_name=storage_name,
+                mime_type=upload.mimetype[:120],
+                size_bytes=size_bytes,
+            )
+            db.session.add(asset)
+            db.session.commit()
+            flash(f"رسانه خصوصی ذخیره شد؛ شناسه دارایی {asset.id}.", "success")
+    return redirect(url_for("admin.form_editor", form_id=form.id))
+
+
+@bp.get("/forms/media/<int:asset_id>")
+@login_required
+def form_media(asset_id):
+    asset = db.get_or_404(FormMediaAsset, asset_id)
+    allowed = current_user.is_staff or asset.owner_id == current_user.id
+    if not allowed and current_user.role == "parent":
+        child_ids = {child.id for child in current_user.children}
+        child_ids.update(
+            link.child_id
+            for link in GuardianRelationship.query.filter_by(
+                guardian_id=current_user.id, status="active", access_level="full"
+            ).all()
+        )
+        allowed = any(
+            assignment.status == "active" and (
+                assignment.target_type == "role" and assignment.target_ref == "parent"
+                or assignment.target_type == "user" and assignment.target_id == current_user.id
+                or assignment.target_type == "child" and assignment.target_id in child_ids
+            )
+            for assignment in asset.form.assignments
+        )
+    if not allowed:
+        abort(404)
+    folder = os.path.join(current_app.instance_path, "form_uploads")
+    return send_from_directory(
+        folder,
+        asset.storage_name,
+        mimetype=asset.mime_type,
+        as_attachment=request.args.get("download") == "1",
+        download_name=asset.original_name,
+        max_age=0,
+    )
+
+
+@bp.get("/forms/<int:form_id>/responses")
+@login_required
+@admin_required
+def form_responses(form_id):
+    form = db.get_or_404(DynamicForm, form_id)
+    responses = FormResponse.query.filter_by(form_id=form.id).order_by(
+        FormResponse.updated_at.desc()
+    ).all()
+    return render_template(
+        "admin/form_responses.html",
+        form=form,
+        responses=responses,
+        assignments=FormAssignment.query.filter_by(form_id=form.id).order_by(FormAssignment.created_at.desc()).all(),
+        parents=User.query.filter_by(role="parent").order_by(User.full_name).all(),
+        children=Child.query.order_by(Child.name).all(),
+    )
+
+
+@bp.get("/forms/<int:form_id>/responses.csv")
+@login_required
+@admin_required
+def form_responses_export(form_id):
+    form = db.get_or_404(DynamicForm, form_id)
+    fields = [field for field in form.fields if field.get("type") not in {"content", "section", "page"}]
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(["response_id", "status", "user", "mobile", "child", "version", "score", *[field.get("label") for field in fields]])
+    for response in FormResponse.query.filter_by(form_id=form.id).order_by(FormResponse.id).all():
+        writer.writerow([
+            response.id,
+            response.status,
+            response.user.full_name,
+            response.user.mobile,
+            response.child.name if response.child else "",
+            response.form_version,
+            response.score_total if response.score_total is not None else "",
+            *[
+                " | ".join(map(str, response.answers.get(field.get("key"), [])))
+                if isinstance(response.answers.get(field.get("key")), list)
+                else response.answers.get(field.get("key"), "")
+                for field in fields
+            ],
+        ])
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{form.slug}-responses.csv"'},
+    )
 

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ assignment.title }} | والدیار{% endblock %}
+{% block body_class %}parent-page form-runner-page{% endblock %}
+{% block content %}
+<section class="form-runner-header">
+  <div class="container">
+    <a href="{{ url_for('parent.assigned_forms') }}"><i class="fa-solid fa-arrow-right ms-2"></i>فرم‌های من</a>
+    <div class="form-runner-heading">
+      <div>
+        {% set form_type_labels = {'assessment':'سنجش','intake':'شناخت اولیه','profile':'پروفایل','quiz':'آزمون آموزشی','report':'گزارش رشد','survey':'نظرسنجی','payment':'مالی'} %}
+        <span>{{ form_type_labels.get(form.form_type, form.form_type) }} · نسخه {{ form.version }}</span>
+        <h1>{{ assignment.title }}</h1><p>{{ form.description }}</p>
+      </div>
+      {% if selected_child %}<div class="runner-child"><span>{{ selected_child.name[:1] }}</span><div><small>فرزند مرتبط</small><strong>{{ selected_child.name }}</strong></div></div>{% endif %}
+    </div>
+  </div>
+</section>
+<div class="container form-runner-container">
+  {% if result %}
+  <div class="form-result-card"><span class="result-icon"><i class="fa-solid fa-circle-check"></i></span><div>
+    <small>پاسخ نهایی ثبت شد</small><h2>{{ form.settings.get('confirmation_title', 'پاسخ شما ثبت شد') }}</h2><p>{{ form.settings.get('confirmation_message', 'از همراهی شما سپاسگزاریم.') }}</p>
+    {% if result.score_total is not none and form.scoring.get('show_score', true) %}<div class="result-score"><strong>{{ result.score_total }}</strong><span>امتیاز کل</span></div>{% endif %}
+    {% if interpretation and form.scoring.get('show_interpretation', true) %}<div class="result-interpretation" style="--result-color:{{ interpretation.color }}"><h3>{{ interpretation.title }}</h3><p>{{ interpretation.body }}</p></div>{% endif %}
+    <a class="btn btn-outline-custom" href="{{ url_for('parent.assigned_forms') }}">بازگشت به فرم‌های من</a>
+  </div></div>
+  {% else %}
+  <div class="runner-layout">
+    <main class="form-runner-card">
+      <div class="runner-progress" data-runner-progress data-style="{{ form.settings.get('progress', 'bar') }}"><div><span>پیشرفت فرم</span><strong data-progress-label>۰٪</strong></div><div class="progress"><div class="progress-bar" data-progress-bar></div></div><div class="runner-steps" data-progress-steps></div></div>
+      <form method="post" enctype="multipart/form-data" id="dynamicFormRunner" data-settings='{{ form.settings_json|e }}'>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if assignment.target_type != 'child' and children|length > 1 %}
+        <div class="runner-child-select"><label class="form-label">این پاسخ مربوط به کدام فرزند است؟</label><select class="form-select" name="child_id" required><option value="">انتخاب فرزند</option>{% for child in children %}<option value="{{ child.id }}" {% if selected_child and selected_child.id == child.id %}selected{% endif %}>{{ child.name }} · متولد {{ child.birth_year }}</option>{% endfor %}</select></div>
+        {% elif selected_child %}<input type="hidden" name="child_id" value="{{ selected_child.id }}">{% endif %}
+        <div id="runnerFields">
+          {% for field in form.fields %}
+          {% set key = field.key %}{% set value = answers.get(key, field.default) %}
+          {% if field.type == 'page' %}<div class="runner-page-break" data-page-break data-title="{{ field.progress_title or field.label }}"></div>
+          {% elif field.type == 'section' %}<section class="runner-section-heading"><span>{{ loop.index }}</span><div><h2>{{ field.label }}</h2>{% if field.description %}<p>{{ field.description }}</p>{% endif %}</div></section>
+          {% elif field.type == 'content' %}<div class="runner-content-block">{{ field.description or field.label }}</div>
+          {% elif field.type == 'hidden' %}<input type="hidden" name="answer_{{ key }}" value="{{ field.default }}">
+          {% else %}
+          <div class="runner-field width-{{ field.width or 100 }}" data-field-key="{{ key }}" data-logic='{{ field.conditional_logic|tojson|e }}'>
+            <label class="runner-label" for="answer_{{ key }}">{{ field.label }}{% if field.required %}<em>*</em>{% endif %}</label>
+            {% if field.media.url %}<div class="runner-question-media">{% if field.media.kind == 'image' %}<img src="{{ field.media.url }}" alt="{{ field.media.alt }}">{% elif field.media.kind == 'video' %}<video src="{{ field.media.url }}" controls preload="metadata"></video>{% elif field.media.kind == 'audio' %}<audio src="{{ field.media.url }}" controls preload="metadata"></audio>{% else %}<a href="{{ field.media.url }}">{{ field.media.alt or 'مشاهده رسانه' }}</a>{% endif %}</div>{% endif %}
+            {% if field.type in ['paragraph','address','post_content','post_excerpt','matrix','list','repeater'] %}
+            <textarea class="form-control" id="answer_{{ key }}" name="answer_{{ key }}" rows="{{ 5 if field.type in ['matrix','repeater'] else 3 }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>{{ value or '' }}</textarea>
+            {% elif field.type in ['dropdown','chained','post_category'] %}
+            <select class="form-select" id="answer_{{ key }}" name="answer_{{ key }}" {% if field.required %}required{% endif %}><option value="">انتخاب کنید</option>{% for option in field.options %}<option value="{{ option.value }}" {% if value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
+            {% elif field.type in ['multiselect','post_tags'] %}
+            <select class="form-select" id="answer_{{ key }}" name="answer_{{ key }}" multiple {% if field.required %}required{% endif %}>{% for option in field.options %}<option value="{{ option.value }}" {% if option.value in value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
+            {% elif field.type in ['single_choice','multiple_choice','image_choice','image_multiple_choice','video_choice','video_multiple_choice','audio_choice','audio_multiple_choice','quiz','poll','price_option'] %}
+            {% set media_choice_types = ['image_choice','image_multiple_choice','video_choice','video_multiple_choice','audio_choice','audio_multiple_choice'] %}{% set multiple_types = ['multiple_choice','image_multiple_choice','video_multiple_choice','audio_multiple_choice'] %}
+            <div class="runner-options {{ 'media-options' if field.type in media_choice_types else '' }}">{% for option in field.options %}<label><input type="{{ 'checkbox' if field.type in multiple_types else 'radio' }}" name="answer_{{ key }}" value="{{ option.value }}" {% if (value is iterable and value is not string and option.value in value) or value|string == option.value|string %}checked{% endif %} {% if field.required %}required{% endif %}>{% if option.media_url %}{% if option.media_kind == 'image' %}<img src="{{ option.media_url }}" alt="">{% elif option.media_kind == 'video' %}<video src="{{ option.media_url }}" controls preload="metadata"></video>{% elif option.media_kind == 'audio' %}<audio src="{{ option.media_url }}" controls preload="metadata"></audio>{% endif %}{% endif %}<span><i></i>{{ option.label }}</span></label>{% endfor %}</div>
+            {% elif field.type in ['scale','rating'] %}
+            {% set minimum = field.validation.get('min', 1)|int %}{% set maximum = field.validation.get('max', 5)|int %}<div class="runner-scale">{% for number in range(minimum, maximum + 1) %}<label><input type="radio" name="answer_{{ key }}" value="{{ number }}" {% if value|string == number|string %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ number }}</span></label>{% endfor %}</div>
+            {% elif field.type == 'slider' %}
+            <div class="runner-slider"><input class="form-range" type="range" id="answer_{{ key }}" name="answer_{{ key }}" min="{{ field.validation.get('min', 1) }}" max="{{ field.validation.get('max', 10) }}" step="{{ field.validation.get('step', 1) }}" value="{{ value or field.validation.get('min', 1) }}"><output>{{ value or field.validation.get('min', 1) }}</output></div>
+            {% elif field.type in ['file','image_answer','video_answer','audio_answer','signature'] %}
+            <div class="runner-upload"><i class="fa-solid fa-cloud-arrow-up"></i><strong>انتخاب فایل خصوصی</strong><small>{{ field.validation.get('allowed_extensions', [])|join('، ') }} · حداکثر {{ field.validation.get('max_size_mb', 5) }} مگابایت</small><input type="file" id="answer_{{ key }}" name="answer_{{ key }}" {% if field.required and not value %}required{% endif %}></div>{% if value %}<small class="saved-file"><i class="fa-solid fa-lock"></i>فایل قبلی محفوظ است.</small>{% endif %}
+            {% elif field.type == 'consent' %}
+            <label class="runner-consent"><input type="checkbox" id="answer_{{ key }}" name="answer_{{ key }}" value="1" {% if value %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ field.description or 'این رضایت‌نامه را مطالعه کرده و می‌پذیرم.' }}</span></label>
+            {% elif field.type == 'captcha' %}
+            <div class="runner-captcha"><strong>برای بررسی انسانی عدد ۹ را وارد کنید</strong><input class="form-control" id="answer_{{ key }}" name="answer_{{ key }}" inputmode="numeric" value="{{ value or '' }}" {% if field.required %}required pattern="9"{% endif %}></div>
+            {% else %}
+            {% set input_type = 'number' if field.type in ['number','quantity','calculation','product','shipping','total'] else 'email' if field.type == 'email' else 'tel' if field.type == 'phone' else 'date' if field.type == 'date' else 'time' if field.type == 'time' else 'url' if field.type == 'url' else 'password' if field.type == 'password' else 'text' %}
+            <input class="form-control" id="answer_{{ key }}" name="answer_{{ key }}" value="{{ value or '' }}" placeholder="{{ field.placeholder }}" type="{{ input_type }}" {% if field.required %}required{% endif %} {% if field.validation.get('min') is not none %}min="{{ field.validation.min }}"{% endif %} {% if field.validation.get('max') is not none %}max="{{ field.validation.max }}"{% endif %}>
+            {% endif %}
+            {% if field.description and field.type != 'consent' %}<div class="form-text">{{ field.description }}</div>{% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        <div class="runner-navigation"><button type="button" class="btn btn-light" data-runner-prev hidden><i class="fa-solid fa-arrow-right ms-2"></i>{{ form.settings.get('previous_label', 'قبلی') }}</button><div>{% if form.settings.get('save_draft', true) %}<button class="btn btn-outline-custom" type="submit" name="action" value="save_draft"><i class="fa-regular fa-floppy-disk ms-2"></i>ذخیره موقت</button>{% endif %}<button type="button" class="btn btn-primary-custom" data-runner-next>{{ form.settings.get('next_label', 'بعدی') }}<i class="fa-solid fa-arrow-left me-2"></i></button><button class="btn btn-primary-custom" type="submit" name="action" value="submit" data-runner-submit hidden>{{ form.settings.get('submit_label', 'ثبت نهایی') }}<i class="fa-solid fa-circle-check me-2"></i></button></div></div>
+      </form>
+    </main>
+    <aside class="runner-aside"><div><i class="fa-solid fa-shield-halved"></i><h3>حریم خصوصی</h3><p>پاسخ‌های هر فرزند جدا ذخیره می‌شوند و فقط شما و مدیر مجاز پرونده می‌بینید.</p></div><div><i class="fa-solid fa-clock-rotate-left"></i><h3>ادامه در فرصت بعد</h3><p>با «ذخیره موقت» پاسخ‌ها را بدون ثبت نهایی نگه دارید.</p></div>{% if assignment.due_at %}<div><i class="fa-solid fa-calendar-day"></i><h3>مهلت انجام</h3><p>{{ assignment.due_at.strftime('%Y-%m-%d %H:%M') }}</p></div>{% endif %}</aside>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,3 +1,4 @@
+import io
 import json
 
 from app.extensions import db
@@ -14,7 +15,10 @@ from app.models import (
     DataDeletionRequest,
     DailyAction,
     DynamicForm,
+    FormAssignment,
+    FormMediaAsset,
     FormResponse,
+    FormVersion,
     GuardianRelationship,
     HomeActionOutcome,
     MicroLesson,
@@ -39,6 +43,15 @@ from app.models import (
     SponsoredProject,
     User,
     WeeklyPlan,
+)
+from app.form_engine import (
+    AI_CONTRACT,
+    FIELD_TYPES,
+    allowed_upload,
+    normalize_schema,
+    normalize_scoring,
+    score_answers,
+    validate_ai_contract,
 )
 
 from .conftest import login
@@ -1458,4 +1471,306 @@ def test_admin_and_parent_unified_profile_pages_render(client, app):
     assert self_page.status_code == family_page.status_code == 200
     assert "پرونده یکپارچه" in self_page.get_data(as_text=True)
     assert "پروفایل رها" in family_page.get_data(as_text=True)
+
+
+def professional_form_fields():
+    fields, errors = normalize_schema(
+        [
+            {
+                "id": "anger",
+                "key": "anger",
+                "type": "scale",
+                "label": "شدت خشم",
+                "required": True,
+                "validation": {"min": 1, "max": 5, "step": 1},
+                "scoring": {"weight": 2, "reverse": True, "subscale": "regulation"},
+            },
+            {
+                "id": "note",
+                "key": "note",
+                "type": "paragraph",
+                "label": "شرح موقعیت",
+                "conditional_logic": {
+                    "enabled": True,
+                    "match": "all",
+                    "action": "show",
+                    "rules": [{"field": "anger", "operator": "greater_than", "value": 3}],
+                },
+            },
+        ]
+    )
+    assert errors == []
+    return fields
+
+
+def form_editor_payload(action="save_draft", title="سنجش تنظیم هیجان"):
+    return {
+        "action": action,
+        "title": title,
+        "slug": "emotion-regulation",
+        "description": "سنجش کوتاه برای مسیر رشد خانواده",
+        "form_type": "assessment",
+        "use_case": "child_baseline",
+        "schema_json": json.dumps(professional_form_fields(), ensure_ascii=False),
+        "settings_json": json.dumps(
+            {"progress": "steps", "save_draft": True, "confirmation_title": "ثبت شد"},
+            ensure_ascii=False,
+        ),
+        "scoring_json": json.dumps(
+            {
+                "mode": "weighted",
+                "show_score": True,
+                "show_interpretation": True,
+                "interpretations": [
+                    {"key": "steady", "min": 0, "max": 5, "title": "پایدار"},
+                    {"key": "needs_support", "min": 5.01, "max": 20, "title": "نیازمند حمایت"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def test_stage_ten_catalog_has_exactly_54_supported_fields():
+    assert len(FIELD_TYPES) == 54
+    assert {"scale", "matrix", "signature", "product", "video_answer"} <= FIELD_TYPES
+
+
+def test_ai_contract_validation_is_strict_and_normalizes_to_draft_shape():
+    payload = {
+        "contract": AI_CONTRACT,
+        "meta": {"title": "آزمون شناخت فرزند", "slug": "child-view", "type": "assessment"},
+        "sections": [
+            {
+                "id": "identity",
+                "title": "شناخت اولیه",
+                "fields": [{"id": "name", "key": "name", "type": "name", "label": "نام"}],
+            }
+        ],
+        "settings": {"progress": "bar"},
+        "scoring": {"mode": "manual"},
+    }
+    normalized, errors = validate_ai_contract(payload)
+    assert errors == []
+    assert normalized["title"] == "آزمون شناخت فرزند"
+    assert normalized["fields"][0]["type"] == "section"
+    assert normalized["fields"][1]["key"] == "name"
+    _normalized, invalid_errors = validate_ai_contract({**payload, "contract": "wrong-v1"})
+    assert any("ensha-assessment-v2" in error for error in invalid_errors)
+
+
+def test_scoring_supports_weight_reverse_subscale_and_non_overlapping_ranges():
+    fields = professional_form_fields()
+    scoring, errors = normalize_scoring(
+        {
+            "mode": "weighted",
+            "interpretations": [
+                {"key": "low", "min": 0, "max": 5, "title": "کم"},
+                {"key": "high", "min": 5.1, "max": 10, "title": "زیاد"},
+            ],
+        }
+    )
+    assert errors == []
+    total, subscales, interpretation = score_answers(fields, {"anger": "2"}, scoring)
+    assert total == 8
+    assert subscales == {"regulation": 8}
+    assert interpretation["key"] == "high"
+    _value, overlap_errors = normalize_scoring(
+        {"mode": "sum", "interpretations": [{"key": "a", "min": 0, "max": 5}, {"key": "b", "min": 5, "max": 9}]}
+    )
+    assert any("هم‌پوشانی" in error for error in overlap_errors)
+
+
+def test_ai_import_creates_draft_and_export_preserves_contract(client, app):
+    payload = {
+        "contract": AI_CONTRACT,
+        "meta": {"title": "فرم واردشده هوشمند", "slug": "ai-import", "type": "intake"},
+        "fields": [{"id": "parent_name", "key": "parent_name", "type": "name", "label": "نام والد"}],
+        "settings": {"save_draft": True},
+        "scoring": {"mode": "manual"},
+    }
+    login(client, mobile="09120000001", password="AdminPass123")
+    imported = client.post("/admin/forms/import", data={"json_payload": json.dumps(payload, ensure_ascii=False)})
+    assert imported.status_code == 302
+    with app.app_context():
+        form = DynamicForm.query.filter_by(slug="ai-import").one()
+        assert form.status == "draft"
+        assert FormVersion.query.filter_by(form_id=form.id, version=1).count() == 1
+        form_id = form.id
+    exported = client.get(f"/admin/forms/{form_id}/export.json")
+    assert exported.status_code == 200
+    assert exported.get_json()["contract"] == AI_CONTRACT
+    assert exported.get_json()["meta"]["type"] == "intake"
+
+
+def test_form_publish_requires_exact_independently_approved_snapshot(client, app):
+    with app.app_context():
+        reviewer = User(full_name="ناظر فرم", mobile="09120000009", role="reviewer")
+        reviewer.set_password("ReviewerPass123")
+        db.session.add(reviewer)
+        db.session.commit()
+    login(client, mobile="09120000001", password="AdminPass123")
+    assert client.get("/admin/forms/new").status_code == 200
+    created = client.post("/admin/forms/new", data=form_editor_payload())
+    assert created.status_code == 302
+    with app.app_context():
+        form_id = DynamicForm.query.filter_by(slug="emotion-regulation").one().id
+    review_payload = form_editor_payload(action="request_review")
+    assert client.post(f"/admin/forms/{form_id}/edit", data=review_payload).status_code == 302
+    with app.app_context():
+        review_id = ScientificReview.query.filter_by(resource_type="form", resource_id=form_id).one().id
+    client.post("/auth/logout")
+    login(client, mobile="09120000009", password="ReviewerPass123")
+    assert client.post(
+        "/admin/scientific-review",
+        data={"action": "approve", "review_id": review_id, "reviewer_note": "معتبر است"},
+    ).status_code == 302
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    changed = form_editor_payload(action="publish", title="عنوان تغییرکرده پس از تأیید")
+    rejected = client.post(f"/admin/forms/{form_id}/edit", data=changed, follow_redirects=True)
+    assert "محتوا پس از تأیید تغییر کرده است" in rejected.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(DynamicForm, form_id).status == "review"
+    published = client.post(f"/admin/forms/{form_id}/edit", data=form_editor_payload(action="publish"))
+    assert published.status_code == 302
+    with app.app_context():
+        form = db.session.get(DynamicForm, form_id)
+        assert form.status == "published"
+        assert form.published_at is not None
+
+
+def test_parent_assignment_draft_submit_scoring_and_csv(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        fields = professional_form_fields()
+        scoring, _ = normalize_scoring(
+            {"mode": "weighted", "interpretations": [{"key": "high", "min": 0, "max": 10, "title": "نتیجه"}]}
+        )
+        form = DynamicForm(
+            title="فرم مسیر خانواده",
+            slug="family-path-form",
+            status="published",
+            schema_json=json.dumps(fields, ensure_ascii=False),
+            settings_json=json.dumps({"save_draft": True}, ensure_ascii=False),
+            scoring_json=json.dumps(scoring, ensure_ascii=False),
+            created_by=admin.id,
+        )
+        db.session.add(form)
+        db.session.flush()
+        assignment = FormAssignment(
+            form_id=form.id,
+            target_type="role",
+            target_ref="parent",
+            title="تکلیف سنجش",
+            created_by=admin.id,
+        )
+        db.session.add(assignment)
+        db.session.commit()
+        form_id, assignment_id = form.id, assignment.id
+    login(client)
+    page = client.get("/dashboard/forms")
+    assert page.status_code == 200
+    assert "تکلیف سنجش" in page.get_data(as_text=True)
+    draft = client.post(
+        f"/dashboard/forms/{assignment_id}", data={"action": "save_draft", "answer_anger": "2"}
+    )
+    assert draft.status_code == 302
+    submitted = client.post(
+        f"/dashboard/forms/{assignment_id}", data={"action": "submit", "answer_anger": "2"}
+    )
+    assert submitted.status_code == 302
+    with app.app_context():
+        response = FormResponse.query.filter_by(assignment_id=assignment_id).one()
+        assert response.status == "submitted"
+        assert response.score_total == 8
+        assert response.result_key == "high"
+    client.post("/auth/logout")
+    login(client, mobile="09120000001", password="AdminPass123")
+    exported = client.get(f"/admin/forms/{form_id}/responses.csv")
+    assert exported.status_code == 200
+    assert exported.data.startswith("\ufeff".encode())
+    assert "09120000002" in exported.get_data(as_text=True)
+
+
+def test_child_assignment_is_isolated_from_unrelated_parent(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        owner = User.query.filter_by(mobile="09120000002").one()
+        stranger = User(full_name="والد دیگر", mobile="09120000003", role="parent")
+        stranger.set_password("OtherPass123")
+        child = Child(user_id=owner.id, name="نیلا", birth_year=1393, gender="girl")
+        form = DynamicForm(
+            title="فرم اختصاصی نیلا",
+            slug="nila-only",
+            status="published",
+            schema_json=json.dumps(professional_form_fields(), ensure_ascii=False),
+            created_by=admin.id,
+        )
+        db.session.add_all([stranger, child, form])
+        db.session.flush()
+        assignment = FormAssignment(
+            form_id=form.id,
+            target_type="child",
+            target_id=child.id,
+            title=form.title,
+            created_by=admin.id,
+        )
+        db.session.add(assignment)
+        db.session.commit()
+        assignment_id = assignment.id
+    login(client, mobile="09120000003", password="OtherPass123")
+    assert client.get(f"/dashboard/forms/{assignment_id}").status_code == 404
+    client.post("/auth/logout")
+    login(client)
+    assert client.get(f"/dashboard/forms/{assignment_id}").status_code == 200
+
+
+def test_upload_validation_checks_extension_mime_size_and_real_signature():
+    field = {
+        "type": "image_answer",
+        "validation": {"allowed_extensions": ["png"], "max_size_mb": 1},
+    }
+    valid_header = b"\x89PNG\r\n\x1a\n" + b"0" * 24
+    assert allowed_upload(field, "safe.png", "image/png", 128, valid_header) == (True, "png")
+    assert allowed_upload(field, "fake.png", "image/png", 128, b"not-a-png")[0] is False
+    assert allowed_upload(field, "safe.exe", "image/png", 128, valid_header)[0] is False
+    assert allowed_upload(field, "safe.png", "text/plain", 128, valid_header)[0] is False
+
+
+def test_admin_media_upload_is_private_and_rejects_disguised_file(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        fields, _ = normalize_schema(
+            [{"id": "proof", "key": "proof", "type": "file", "label": "مدرک", "validation": {"allowed_extensions": ["pdf"], "max_size_mb": 2}}]
+        )
+        form = DynamicForm(
+            title="فرم مدرک",
+            slug="proof-form",
+            status="draft",
+            schema_json=json.dumps(fields, ensure_ascii=False),
+            created_by=admin.id,
+        )
+        db.session.add(form)
+        db.session.commit()
+        form_id = form.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    rejected = client.post(
+        f"/admin/forms/{form_id}/media",
+        data={"field_key": "proof", "kind": "file", "media": (io.BytesIO(b"malware"), "fake.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "محتوای واقعی فایل" in rejected.get_data(as_text=True)
+    accepted = client.post(
+        f"/admin/forms/{form_id}/media",
+        data={"field_key": "proof", "kind": "file", "media": (io.BytesIO(b"%PDF-1.4\n%%EOF"), "safe.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+    assert accepted.status_code == 302
+    with app.app_context():
+        asset = FormMediaAsset.query.one()
+        asset_id = asset.id
+        assert asset.storage_name != "safe.pdf"
+    assert client.get(f"/admin/forms/media/{asset_id}").status_code == 200
 

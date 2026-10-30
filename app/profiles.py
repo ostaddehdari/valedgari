@@ -1,6 +1,7 @@
 import json
 
 from .extensions import db
+from .form_engine import MULTI_VALUE_TYPES, NON_INPUT_TYPES
 from .models import ProfileDefinition, ProfileRecord
 
 
@@ -35,6 +36,10 @@ def profile_sections(definition, record=None):
             continue
         fields = []
         for field in binding.form.fields:
+            if field.get("type") in NON_INPUT_TYPES:
+                if field.get("type") in {"content", "section"}:
+                    fields.append({**field, "field_id": "", "input_name": "", "value": ""})
+                continue
             field_id = str(field.get("id", "")).strip()
             if not field_id:
                 continue
@@ -66,7 +71,14 @@ def save_profile_values(definition, subject_id, form_data, actor_id):
     for section in profile_sections(definition, record):
         binding = section["binding"]
         for field in section["fields"]:
-            value = form_data.get(field["input_name"], "")
+            if not field.get("input_name"):
+                continue
+            if field.get("type") in MULTI_VALUE_TYPES:
+                value = form_data.getlist(field["input_name"])
+            elif field.get("type") == "consent":
+                value = form_data.get(field["input_name"]) == "1"
+            else:
+                value = form_data.get(field["input_name"], "")
             if isinstance(value, str):
                 value = value.strip()
             if field.get("required") and not value:

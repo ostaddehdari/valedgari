@@ -461,31 +461,147 @@ class DynamicForm(db.Model):
     title = db.Column(db.String(160), nullable=False)
     slug = db.Column(db.String(100), unique=True, nullable=False)
     description = db.Column(db.String(500), nullable=False, default="")
-    status = db.Column(db.String(20), nullable=False, default="draft")
+    form_type = db.Column(db.String(30), nullable=False, default="assessment", index=True)
+    use_case = db.Column(db.String(80), nullable=False, default="general", index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
     schema_json = db.Column(db.Text, nullable=False, default="[]")
+    settings_json = db.Column(db.Text, nullable=False, default="{}")
+    scoring_json = db.Column(db.Text, nullable=False, default="{}")
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    published_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    archived_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    versions = db.relationship(
+        "FormVersion", backref="form", lazy=True, cascade="all, delete-orphan",
+        order_by="FormVersion.version.desc()",
+    )
+    assignments = db.relationship(
+        "FormAssignment", backref="form", lazy=True, cascade="all, delete-orphan"
+    )
 
     @property
     def fields(self):
         try:
-            return json.loads(self.schema_json)
+            value = json.loads(self.schema_json or "[]")
+            return value if isinstance(value, list) else []
         except (TypeError, ValueError):
             return []
+
+    @property
+    def settings(self):
+        try:
+            value = json.loads(self.settings_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def scoring(self):
+        try:
+            value = json.loads(self.scoring_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def response_count(self):
+        return FormResponse.query.filter_by(form_id=self.id, status="submitted").count()
+
+
+class FormVersion(db.Model):
+    __tablename__ = "form_versions"
+    id = db.Column(db.Integer, primary_key=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    version = db.Column(db.Integer, nullable=False)
+    title = db.Column(db.String(160), nullable=False)
+    schema_json = db.Column(db.Text, nullable=False, default="[]")
+    settings_json = db.Column(db.Text, nullable=False, default="{}")
+    scoring_json = db.Column(db.Text, nullable=False, default="{}")
+    snapshot_hash = db.Column(db.String(64), nullable=False, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (db.UniqueConstraint("form_id", "version"),)
+
+
+class FormAssignment(db.Model):
+    __tablename__ = "form_assignments"
+    id = db.Column(db.Integer, primary_key=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    target_type = db.Column(db.String(30), nullable=False, index=True)
+    target_id = db.Column(db.Integer, nullable=True, index=True)
+    target_ref = db.Column(db.String(120), nullable=False, default="")
+    title = db.Column(db.String(180), nullable=False, default="")
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    is_required = db.Column(db.Boolean, nullable=False, default=False)
+    opens_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class FormMediaAsset(db.Model):
+    __tablename__ = "form_media_assets"
+    id = db.Column(db.Integer, primary_key=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    field_key = db.Column(db.String(80), nullable=False, default="")
+    kind = db.Column(db.String(30), nullable=False, default="file")
+    original_name = db.Column(db.String(240), nullable=False)
+    storage_name = db.Column(db.String(120), unique=True, nullable=False)
+    mime_type = db.Column(db.String(120), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False)
+    is_private = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    form = db.relationship("DynamicForm")
+    owner = db.relationship("User")
 
 
 class FormResponse(db.Model):
     __tablename__ = "form_responses"
     id = db.Column(db.Integer, primary_key=True)
     form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False)
+    assignment_id = db.Column(db.Integer, db.ForeignKey("form_assignments.id"), nullable=True, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True)
+    form_version = db.Column(db.Integer, nullable=False, default=1)
+    status = db.Column(db.String(20), nullable=False, default="submitted", index=True)
     answers_json = db.Column(db.Text, nullable=False)
+    score_total = db.Column(db.Float, nullable=True)
+    subscale_scores_json = db.Column(db.Text, nullable=False, default="{}")
+    result_key = db.Column(db.String(80), nullable=False, default="")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    submitted_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     form = db.relationship("DynamicForm")
     child = db.relationship("Child")
+    assignment = db.relationship("FormAssignment")
+    user = db.relationship("User")
+
+    @property
+    def answers(self):
+        try:
+            value = json.loads(self.answers_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def subscale_scores(self):
+        try:
+            value = json.loads(self.subscale_scores_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 
 
 class ProfileDefinition(db.Model):

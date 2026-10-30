@@ -1,1 +1,47 @@
-{% for section in profile_sections %}<section class="profile-form-section"><div class="profile-form-section-head"><div><span>{{ section.form.title }}</span><h3>{{ section.title }}</h3></div><small>فرم منتشرشده · {{ section.fields|length }} فیلد</small></div><div class="row g-3">{% for field in section.fields %}<div class="col-md-{{ 12 if field.type in ['textarea','paragraph','content','section','radio','single_choice'] else 6 }}"><label class="form-label" for="{{ field.input_name }}">{{ field.label }}{% if field.required %} *{% endif %}</label>{% if field.type in ['textarea','paragraph'] %}<textarea class="form-control" id="{{ field.input_name }}" name="{{ field.input_name }}" rows="3" {% if field.required %}required{% endif %}>{{ field.value }}</textarea>{% elif field.type in ['select','dropdown'] %}<select class="form-select" id="{{ field.input_name }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}><option value="">انتخاب کنید</option>{% for option in field.options|default([]) %}{% set option_value=option.value if option is mapping else option %}<option value="{{ option_value }}" {% if field.value|string==option_value|string %}selected{% endif %}>{{ option.label if option is mapping else option }}</option>{% endfor %}</select>{% elif field.type in ['radio','single_choice'] %}<div class="profile-choice-row" id="{{ field.input_name }}">{% for option in field.options|default([]) %}{% set option_value=option.value if option is mapping else option %}<label><input type="radio" name="{{ field.input_name }}" value="{{ option_value }}" {% if field.value|string==option_value|string %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ option.label if option is mapping else option }}</span></label>{% endfor %}</div>{% elif field.type in ['content','section'] %}<div class="profile-content-field">{{ field.help or field.description or field.label }}</div>{% else %}<input class="form-control" id="{{ field.input_name }}" name="{{ field.input_name }}" value="{{ field.value }}" type="{{ 'number' if field.type in ['number','scale','rating','slider'] else ('email' if field.type=='email' else ('tel' if field.type=='phone' else ('date' if field.type=='date' else 'text'))) }}" {% if field.required %}required{% endif %}>{% endif %}{% if field.help %}<div class="form-text">{{ field.help }}</div>{% endif %}</div>{% endfor %}</div></section>{% else %}<div class="inline-empty"><i class="fa-solid fa-link-slash"></i><span>هنوز فرم منتشرشده‌ای به این نوع پروفایل متصل نشده است.</span></div>{% endfor %}
+{% for section in profile_sections %}
+<section class="profile-form-section">
+  <div class="profile-form-section-head"><div><span>{{ section.form.title }}</span><h3>{{ section.title }}</h3></div><small>فرم منتشرشده · {{ section.fields|length }} فیلد</small></div>
+  <div class="row g-3">
+    {% for field in section.fields %}
+    {% set full_width_types = ['paragraph','address','content','section','single_choice','multiple_choice','image_choice','image_multiple_choice','video_choice','video_multiple_choice','audio_choice','audio_multiple_choice','consent'] %}
+    <div class="col-md-{{ 12 if field.type in full_width_types else 6 }}">
+      {% if field.type in ['content','section'] %}
+      <div class="profile-content-field">{{ field.help or field.description or field.label }}</div>
+      {% else %}
+      <label class="form-label" for="{{ field.input_name }}">{{ field.label }}{% if field.required %} *{% endif %}</label>
+      {% if field.type in ['paragraph','address','post_content','post_excerpt','matrix','list','repeater'] %}
+      <textarea class="form-control" id="{{ field.input_name }}" name="{{ field.input_name }}" rows="3" {% if field.required %}required{% endif %}>{{ field.value }}</textarea>
+      {% elif field.type in ['dropdown','chained','post_category'] %}
+      <select class="form-select" id="{{ field.input_name }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
+        <option value="">انتخاب کنید</option>
+        {% for option in field.options|default([]) %}{% set option_value = option.value if option is mapping else option %}<option value="{{ option_value }}" {% if field.value|string == option_value|string %}selected{% endif %}>{{ option.label if option is mapping else option }}</option>{% endfor %}
+      </select>
+      {% elif field.type in ['multiselect','post_tags'] %}
+      <select class="form-select" id="{{ field.input_name }}" name="{{ field.input_name }}" multiple {% if field.required %}required{% endif %}>
+        {% for option in field.options|default([]) %}{% set option_value = option.value if option is mapping else option %}<option value="{{ option_value }}" {% if option_value in field.value %}selected{% endif %}>{{ option.label if option is mapping else option }}</option>{% endfor %}
+      </select>
+      {% elif field.type in ['single_choice','multiple_choice','image_choice','image_multiple_choice','video_choice','video_multiple_choice','audio_choice','audio_multiple_choice','quiz','poll','price_option'] %}
+      {% set multi_types = ['multiple_choice','image_multiple_choice','video_multiple_choice','audio_multiple_choice'] %}
+      <div class="profile-choice-row" id="{{ field.input_name }}">
+        {% for option in field.options|default([]) %}{% set option_value = option.value if option is mapping else option %}<label><input type="{{ 'checkbox' if field.type in multi_types else 'radio' }}" name="{{ field.input_name }}" value="{{ option_value }}" {% if (field.value is iterable and field.value is not string and option_value in field.value) or field.value|string == option_value|string %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ option.label if option is mapping else option }}</span></label>{% endfor %}
+      </div>
+      {% elif field.type in ['scale','rating'] %}
+      {% set minimum = field.validation.get('min', 1)|int %}{% set maximum = field.validation.get('max', 5)|int %}
+      <div class="profile-choice-row">{% for number in range(minimum, maximum + 1) %}<label><input type="radio" name="{{ field.input_name }}" value="{{ number }}" {% if field.value|string == number|string %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ number }}</span></label>{% endfor %}</div>
+      {% elif field.type == 'slider' %}
+      <input class="form-range" id="{{ field.input_name }}" name="{{ field.input_name }}" value="{{ field.value or field.validation.get('min', 1) }}" type="range" min="{{ field.validation.get('min', 1) }}" max="{{ field.validation.get('max', 10) }}" step="{{ field.validation.get('step', 1) }}">
+      {% elif field.type == 'consent' %}
+      <label class="runner-consent"><input type="checkbox" id="{{ field.input_name }}" name="{{ field.input_name }}" value="1" {% if field.value %}checked{% endif %} {% if field.required %}required{% endif %}><span>{{ field.description or 'تأیید می‌کنم.' }}</span></label>
+      {% else %}
+      {% set input_type = 'number' if field.type in ['number','quantity','calculation','product','shipping','total'] else 'email' if field.type == 'email' else 'tel' if field.type == 'phone' else 'date' if field.type == 'date' else 'time' if field.type == 'time' else 'url' if field.type == 'url' else 'text' %}
+      <input class="form-control" id="{{ field.input_name }}" name="{{ field.input_name }}" value="{{ field.value }}" type="{{ input_type }}" {% if field.required %}required{% endif %}>
+      {% endif %}
+      {% if field.help or field.description %}<div class="form-text">{{ field.help or field.description }}</div>{% endif %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<div class="inline-empty"><i class="fa-solid fa-link-slash"></i><span>هنوز فرم منتشرشده‌ای به این نوع پروفایل متصل نشده است.</span></div>
+{% endfor %}

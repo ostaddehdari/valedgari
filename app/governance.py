@@ -1,5 +1,6 @@
 from .models import (
     AssessmentInstrument,
+    DynamicForm,
     MicroLesson,
     PersonalizationRule,
     SafetyProtocol,
@@ -12,6 +13,7 @@ RESOURCE_MODELS = {
     "lesson": MicroLesson,
     "rule": PersonalizationRule,
     "protocol": SafetyProtocol,
+    "form": DynamicForm,
 }
 
 
@@ -60,6 +62,17 @@ def resource_snapshot(resource_type, resource):
             "keywords": resource.trigger_keywords,
             "response": resource.response_text,
             "steps": resource.immediate_steps,
+        }
+    elif resource_type == "form":
+        payload = {
+            "title": resource.title,
+            "version": resource.version,
+            "form_type": resource.form_type,
+            "use_case": resource.use_case,
+            "description": resource.description,
+            "fields": resource.fields,
+            "settings": resource.settings,
+            "scoring": resource.scoring,
         }
     else:
         raise ValueError("نوع منبع علمی پشتیبانی نمی‌شود.")
