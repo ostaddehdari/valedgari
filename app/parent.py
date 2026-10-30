@@ -27,7 +27,9 @@ from .models import (
     FormAssignment,
     FormMediaAsset,
     FormResponse,
+    GrowthReportSchedule,
     HomeActionOutcome,
+    JourneyNotification,
     PlanReview,
     PaymentAllocation,
     PaymentTransaction,
@@ -63,6 +65,13 @@ from .form_engine import (
     validate_answers,
 )
 from .course_engine import enrollment_for, recommended_courses
+from .growth_engine import (
+    build_growth_timeline,
+    course_assessment_change,
+    growth_dashboard_state,
+    growth_report_trend,
+    sync_journey_notifications,
+)
 from .scenario_engine import (
     choose_narrative,
     feedback_for,
@@ -278,6 +287,8 @@ def dashboard():
     latest_recommendation = None
     active_plan = None
     today_action = None
+    growth_state = None
+    notifications = []
     if child:
         style_result = (
             ParentingStyleAssessment.query.filter_by(
@@ -301,6 +312,17 @@ def dashboard():
             .first()
         )
         today_action = active_plan.current_action if active_plan else None
+        growth_state = growth_dashboard_state(current_user.id, child.id)
+        if sync_journey_notifications(current_user.id, child.id):
+            db.session.commit()
+        notifications = (
+            JourneyNotification.query.filter_by(
+                user_id=current_user.id, child_id=child.id, status="unread"
+            )
+            .order_by(JourneyNotification.created_at.desc())
+            .limit(4)
+            .all()
+        )
     return render_template(
         "parent/dashboard.html",
         child=child,
@@ -313,7 +335,49 @@ def dashboard():
         latest_recommendation=latest_recommendation,
         active_plan=active_plan,
         today_action=today_action,
+        growth_state=growth_state,
+        notifications=notifications,
     )
+
+
+@bp.get("/growth")
+@login_required
+def growth_center():
+    child = owned_child()
+    if not child:
+        flash("ابتدا پرونده یک فرزند را بسازید.", "warning")
+        return redirect(url_for("parent.children"))
+    state = growth_dashboard_state(current_user.id, child.id)
+    timeline = build_growth_timeline(current_user.id, child.id)
+    enrollments = CourseEnrollment.query.filter_by(
+        user_id=current_user.id, child_id=child.id
+    ).order_by(CourseEnrollment.enrolled_at.desc()).all()
+    assessment_changes = [
+        {"enrollment": item, "result": course_assessment_change(current_user.id, child.id, item.course_id)}
+        for item in enrollments
+        if item.course.assessment_bindings
+    ]
+    notifications = JourneyNotification.query.filter_by(
+        user_id=current_user.id, child_id=child.id
+    ).order_by(JourneyNotification.created_at.desc()).limit(20).all()
+    return render_template(
+        "parent/growth.html", child=child, state=state, timeline=timeline,
+        assessment_changes=assessment_changes, notifications=notifications,
+        report_trend=growth_report_trend(current_user.id, child.id),
+    )
+
+
+@bp.post("/notifications/<int:notification_id>/read")
+@login_required
+def notification_read(notification_id):
+    notification = db.session.get(JourneyNotification, notification_id)
+    if not notification or notification.user_id != current_user.id:
+        abort(404)
+    owned_child(notification.child_id)
+    notification.status = "read"
+    notification.read_at = utcnow()
+    db.session.commit()
+    return redirect(notification.target_url or url_for("parent.growth_center"))
 
 
 @bp.route("/child-profile", methods=["GET", "POST"])
@@ -855,6 +919,17 @@ def fill_form(assignment_id):
                 response.subscale_scores_json = json.dumps(subscales, ensure_ascii=False)
                 response.result_key = interpretation.get("key", "") if interpretation else ""
                 response.submitted_at = utcnow()
+                db.session.flush()
+                schedules = GrowthReportSchedule.query.filter_by(
+                    user_id=current_user.id,
+                    child_id=child.id if child else None,
+                    form_id=form.id,
+                    status="pending",
+                ).all() if child else []
+                for schedule in schedules:
+                    schedule.status = "completed"
+                    schedule.completed_response_id = response.id
+                    schedule.completed_at = utcnow()
             db.session.commit()
             if final:
                 flash(form.settings.get("confirmation_title", "پاسخ شما ثبت شد."), "success")

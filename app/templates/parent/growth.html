@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}مسیر رشد {{ child.name }} | والدیار{% endblock %}
+{% block body_class %}dashboard-page growth-page{% endblock %}
+{% block content %}
+<section class="dashboard-hero growth-hero"><div class="container"><div class="d-flex justify-content-between align-items-end gap-3 flex-wrap"><div><span class="eyebrow light">پرونده طولی خانواده</span><h1>مسیر رشد {{ child.name }}</h1><p>از داده تا اقدام؛ بدون برچسب‌زنی و بدون آمیختن پرونده فرزندان.</p></div><a class="btn btn-light" href="{{ state.next.url }}">قدم بعدی <i class="fa-solid fa-arrow-left me-2"></i></a></div></div></section>
+<div class="container dashboard-content">
+  {% include "parent/_child_switcher.html" %}
+  <section class="growth-now-grid mt-3">
+    <article><span>اکنون کجا هستم؟</span><strong>{{ state.where }}</strong></article>
+    <article><span>چرا اینجا هستم؟</span><strong>{{ state.why }}</strong></article>
+    <article class="next"><span>قدم بعدی چیست؟</span><strong>{{ state.next.title }}</strong><p>{{ state.next.detail }}</p><a href="{{ state.next.url }}">شروع قدم</a></article>
+  </section>
+
+  <div class="row g-4 mt-1">
+    <div class="col-xl-7"><section class="panel-card"><div class="panel-heading"><div><span class="eyebrow">شواهد قابل ردیابی</span><h2>نیازهای مهارتی اولویت‌دار</h2></div></div>
+      <div class="skill-need-list">{% for item in state.needs %}<article><div class="skill-need-score">{{ item.score }}</div><div><strong>{{ item.skill.title }}</strong><p>{{ item.reasons[0] }}</p><details><summary>چرا این اولویت؟</summary><ul>{% for reason in item.reasons %}<li>{{ reason }}</li>{% endfor %}</ul></details></div></article>{% else %}<div class="empty-state py-4"><h3>داده بیشتری لازم است</h3><p>یک موقعیت، فرم یا برنامه هفتگی ثبت کنید تا اولویت مهارتی شکل بگیرد.</p></div>{% endfor %}</div>
+    </section></div>
+    <div class="col-xl-5"><section class="panel-card h-100"><div class="panel-heading"><div><span class="eyebrow">پیشنهاد توضیح‌پذیر</span><h2>دوره مناسب برای {{ child.name }}</h2></div></div>
+      {% for item in state.courses %}<a class="growth-course" href="{{ url_for('main.course_detail', slug=item.course.slug) }}"><i class="fa-solid fa-graduation-cap"></i><div><strong>{{ item.course.title }}</strong><p>{{ item.reasons[0] }}</p><small>بر اساس {{ item.evidence|length }} شاهد داخلی</small></div><i class="fa-solid fa-chevron-left"></i></a>{% else %}<p class="text-muted">پس از ثبت نیاز مهارتی، دوره مرتبط و دلیل آن اینجا نمایش داده می‌شود.</p>{% endfor %}
+    </section></div>
+  </div>
+
+  {% if assessment_changes %}<section class="panel-card mt-4"><div class="panel-heading"><div><span class="eyebrow">قبل و بعد دوره</span><h2>تغییر مهارتی غیرتشخیصی</h2></div></div><div class="row g-3">{% for item in assessment_changes %}<div class="col-md-6"><article class="course-change"><strong>{{ item.enrollment.course.title }}</strong>{% if item.result.available %}<div><span>{{ item.result.pre.score }}</span><i class="fa-solid fa-arrow-left"></i><span>{{ item.result.post.score }}</span><b class="{{ 'positive' if item.result.change >= 0 else 'negative' }}">{{ '%+g'|format(item.result.change) }}</b></div>{% else %}<p>{{ item.result.message }}</p>{% endif %}<small>{{ item.result.message }}</small></article></div>{% endfor %}</div></section>{% endif %}
+  {% if report_trend.scheduled %}<section class="panel-card mt-4"><div class="panel-heading"><div><span class="eyebrow">گزارش‌های حین رشد</span><h2>روند روزانه و هفتگی</h2></div><span class="stage-chip">{{ report_trend.completed }} از {{ report_trend.scheduled }} تکمیل</span></div><p>تغییر امتیاز ثبت‌شده: <strong>{{ report_trend.change if report_trend.change is not none else 'برای روند به دو گزارش نیاز است' }}</strong></p><small class="text-muted">این روند برای پیگیری آموزشی است و تفسیر تشخیصی ندارد.</small></section>{% endif %}
+
+  <div class="row g-4 mt-1">
+    <div class="col-xl-8"><section class="panel-card"><div class="panel-heading"><div><span class="eyebrow">خط زمانی یکپارچه</span><h2>رویدادهای رشد {{ child.name }}</h2></div></div><div class="growth-timeline">{% for item in timeline %}<article><span><i class="fa-solid {{ item.icon }}"></i></span><div><strong>{{ item.title }}</strong><p>{{ item.detail }}</p><small>{{ item.occurred_at.strftime('%Y-%m-%d') }}</small></div></article>{% else %}<p class="text-muted">هنوز رویدادی در پرونده طولی ثبت نشده است.</p>{% endfor %}</div></section></div>
+    <div class="col-xl-4"><section class="panel-card"><div class="panel-heading"><div><span class="eyebrow">بازگشت به مسیر</span><h2>اعلان‌ها</h2></div></div>{% for item in notifications %}<form method="post" action="{{ url_for('parent.notification_read', notification_id=item.id) }}" class="growth-notice {{ item.status }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button><strong>{{ item.title }}</strong><small>{{ item.body }}</small></button></form>{% else %}<p class="text-muted">اعلان بازی ندارید.</p>{% endfor %}</section></div>
+  </div>
+</div>
+{% endblock %}

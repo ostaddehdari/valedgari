@@ -3,10 +3,13 @@ import re
 
 from .learning_path import TOPIC_SKILL, latest_child_profile
 from .models import (
+    CourseEnrollment,
+    FormResponse,
     MicroLesson,
     PersonalizationRule,
     RecommendationRun,
     SafetyProtocol,
+    ScenarioNarrativeAttempt,
     ScenarioTopic,
     SkillModule,
     WeeklyPlan,
@@ -187,6 +190,21 @@ def build_assistant_response(user_id, child, user_text):
     recommendation = _latest_recommendation(user_id, child.id, topic.id)
     rule = _base_rule(topic.id)
     current_action = active_plan.current_action if active_plan and active_plan.topic_id == topic.id else None
+    latest_form = (
+        FormResponse.query.filter_by(user_id=user_id, child_id=child.id, status="submitted")
+        .order_by(FormResponse.submitted_at.desc(), FormResponse.created_at.desc()).first()
+    )
+    latest_scenario = (
+        ScenarioNarrativeAttempt.query.join(ScenarioNarrativeAttempt.narrative)
+        .filter(ScenarioNarrativeAttempt.user_id == user_id,
+                ScenarioNarrativeAttempt.child_id == child.id,
+                ScenarioNarrativeAttempt.narrative.has(topic_id=topic.id))
+        .order_by(ScenarioNarrativeAttempt.created_at.desc()).first()
+    )
+    active_course = (
+        CourseEnrollment.query.filter_by(user_id=user_id, child_id=child.id, status="active")
+        .order_by(CourseEnrollment.enrolled_at.desc()).first()
+    )
     action_text = (
         current_action.instructions
         if current_action
@@ -223,6 +241,10 @@ def build_assistant_response(user_id, child, user_text):
         context_reason.append(f"آخرین پیشنهاد ذخیره‌شده: {recommendation.title}")
     if not context_reason:
         context_reason.append("پیشنهاد پایه محتوای منتشرشده این موضوع")
+    if latest_scenario:
+        context_reason.append(f"آخرین تمرین همین موضوع: {latest_scenario.score} از ۱۰۰")
+    if active_course and topic.id in {item.id for item in active_course.course.topics}:
+        context_reason.append(f"دوره مرتبط در حال یادگیری: {active_course.course.title}")
 
     body = (
         f"برای موقعیت «{topic.title}» با {child.name}، بهتر است از یک قدم کوتاه و قابل مشاهده شروع کنید.\n\n"
@@ -269,6 +291,18 @@ def build_assistant_response(user_id, child, user_text):
                 "source_id": rule.id,
             }
         )
+    if profile:
+        sources.append({"kind": "child_profile", "title": "نمای ثبت‌شده فرزند",
+                        "version": profile.version_no, "source_id": profile.id})
+    if latest_form:
+        sources.append({"kind": "form_response", "title": latest_form.form.title,
+                        "version": latest_form.form_version, "source_id": latest_form.id})
+    if latest_scenario:
+        sources.append({"kind": "scenario_attempt", "title": latest_scenario.narrative.title,
+                        "version": latest_scenario.narrative.version, "source_id": latest_scenario.id})
+    if active_course and topic.id in {item.id for item in active_course.course.topics}:
+        sources.append({"kind": "course", "title": active_course.course.title,
+                        "version": active_course.course.version, "source_id": active_course.course_id})
     return {
         "decision_type": "grounded",
         "body": body,

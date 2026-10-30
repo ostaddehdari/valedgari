@@ -314,6 +314,29 @@ class CourseTopicMembership(db.Model):
     __table_args__ = (db.UniqueConstraint("course_id", "topic_id"),)
 
 
+class CourseAssessmentBinding(db.Model):
+    """Connects a published form to a course's non-diagnostic pre/post measurement."""
+
+    __tablename__ = "course_assessment_bindings"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False, index=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    assessment_type = db.Column(db.String(10), nullable=False, index=True)
+    skill_id = db.Column(db.Integer, db.ForeignKey("skill_modules.id"), nullable=True, index=True)
+    is_required = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    course = db.relationship("Course", backref="assessment_bindings")
+    form = db.relationship("DynamicForm")
+    skill = db.relationship("SkillModule")
+    __table_args__ = (
+        db.UniqueConstraint("course_id", "assessment_type"),
+        db.CheckConstraint(
+            "assessment_type IN ('pre', 'post')", name="ck_course_assessment_type"
+        ),
+    )
+
+
 class CourseChapter(db.Model):
     __tablename__ = "course_chapters"
     id = db.Column(db.Integer, primary_key=True)
@@ -1150,6 +1173,54 @@ class FormResponse(db.Model):
             return value if isinstance(value, dict) else {}
         except (TypeError, ValueError):
             return {}
+
+
+class GrowthReportSchedule(db.Model):
+    """A daily/weekly check-in attached to one child's growth path."""
+
+    __tablename__ = "growth_report_schedules"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    weekly_plan_id = db.Column(db.Integer, db.ForeignKey("weekly_plans.id"), nullable=True, index=True)
+    daily_action_id = db.Column(db.Integer, db.ForeignKey("daily_actions.id"), nullable=True, index=True)
+    cadence = db.Column(db.String(20), nullable=False, default="weekly", index=True)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    completed_response_id = db.Column(
+        db.Integer, db.ForeignKey("form_responses.id"), nullable=True, unique=True
+    )
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    child = db.relationship("Child")
+    form = db.relationship("DynamicForm")
+    plan = db.relationship("WeeklyPlan")
+    action = db.relationship("DailyAction")
+    response = db.relationship("FormResponse")
+
+
+class JourneyNotification(db.Model):
+    """In-product return-to-path notice with deterministic de-duplication."""
+
+    __tablename__ = "journey_notifications"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    kind = db.Column(db.String(40), nullable=False, index=True)
+    title = db.Column(db.String(180), nullable=False)
+    body = db.Column(db.String(700), nullable=False, default="")
+    target_url = db.Column(db.String(300), nullable=False, default="")
+    source_type = db.Column(db.String(40), nullable=False, default="")
+    source_id = db.Column(db.Integer, nullable=True)
+    dedupe_key = db.Column(db.String(160), nullable=False, unique=True, index=True)
+    status = db.Column(db.String(20), nullable=False, default="unread", index=True)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    read_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    child = db.relationship("Child")
 
 
 class ProfileDefinition(db.Model):

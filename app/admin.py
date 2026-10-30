@@ -21,6 +21,7 @@ from .models import (
     ContractBeneficiary,
     ConsentRecord,
     Course,
+    CourseAssessmentBinding,
     CourseChapter,
     CourseEnrollment,
     CourseInvoice,
@@ -39,6 +40,7 @@ from .models import (
     FormMediaAsset,
     FormResponse,
     FormVersion,
+    GrowthReportSchedule,
     GuardianRelationship,
     Organization,
     OrganizationAuditLog,
@@ -137,6 +139,11 @@ from .scenario_engine import (
     narrative_publish_errors,
     narrative_to_contract,
     validate_contract as validate_scenario_contract,
+)
+from .growth_engine import (
+    build_growth_timeline,
+    contract_aggregate_report,
+    growth_dashboard_state,
 )
 
 
@@ -1006,6 +1013,39 @@ def sync_course_links(course, skill_ids, topic_ids):
             db.session.add(CourseTopicMembership(course_id=course.id, topic_id=topic_id))
 
 
+def sync_course_assessments(course, pre_form_id=None, post_form_id=None):
+    """Replace course-level pre/post bindings without changing historic responses."""
+    CourseAssessmentBinding.query.filter_by(course_id=course.id).delete(
+        synchronize_session=False
+    )
+    primary_skill_id = course.skill_links[0].skill_id if course.skill_links else None
+    for assessment_type, form_id in (("pre", pre_form_id), ("post", post_form_id)):
+        form = db.session.get(DynamicForm, form_id) if form_id else None
+        if form and form.status == "published":
+            db.session.add(
+                CourseAssessmentBinding(
+                    course_id=course.id,
+                    form_id=form.id,
+                    assessment_type=assessment_type,
+                    skill_id=primary_skill_id,
+                )
+            )
+            assignment = FormAssignment.query.filter_by(
+                target_type="course", target_ref=str(course.id), form_id=form.id
+            ).first()
+            if not assignment:
+                assignment = FormAssignment(
+                    form_id=form.id,
+                    target_type="course",
+                    target_ref=str(course.id),
+                    title=f"سنجش {'قبل' if assessment_type == 'pre' else 'بعد'} دوره: {course.title}",
+                    created_by=current_user.id,
+                )
+                db.session.add(assignment)
+            else:
+                assignment.status = "active"
+
+
 def sync_course_quiz_assignments(course):
     active_form_ids = {
         unit.form_id
@@ -1017,6 +1057,9 @@ def sync_course_quiz_assignments(course):
             CourseUnit.form_id.isnot(None),
         ).all()
     }
+    active_form_ids.update(
+        item.form_id for item in CourseAssessmentBinding.query.filter_by(course_id=course.id).all()
+    )
     assignments = FormAssignment.query.filter_by(
         target_type="course", target_ref=str(course.id)
     ).all()
@@ -1177,6 +1220,12 @@ def course_editor(course_id=None):
                 request.form.getlist("skill_ids", type=int),
                 request.form.getlist("topic_ids", type=int),
             )
+            db.session.flush()
+            sync_course_assessments(
+                course,
+                request.form.get("pre_form_id", type=int),
+                request.form.get("post_form_id", type=int),
+            )
             sync_course_structure(course, structure)
             db.session.flush()
             sync_course_quiz_assignments(course)
@@ -1199,6 +1248,8 @@ def course_editor(course_id=None):
         levels=COURSE_LEVELS,
         style_tags=STYLE_TAGS,
         unit_types=UNIT_TYPES,
+        assessment_bindings={item.assessment_type: item for item in course.assessment_bindings}
+        if course else {},
     )
 
 
@@ -1844,6 +1895,7 @@ def contract_detail(contract_id):
         projects=sorted(contract.support_plans, key=lambda item: item.created_at, reverse=True),
         parents=User.query.filter_by(role="parent").order_by(User.full_name).all(),
         children=Child.query.order_by(Child.name).all(),
+        aggregate_report=contract_aggregate_report(contract),
     )
 
 
@@ -2512,6 +2564,44 @@ def admin_child_profile(child_id):
                 db.session.commit()
                 flash("دسترسی سرپرست لغو شد؛ سابقه رابطه حفظ گردید.", "info")
             return redirect(url_for("admin.admin_child_profile", child_id=child.id))
+        elif action == "schedule_growth_report":
+            form = db.session.get(DynamicForm, request.form.get("form_id", type=int))
+            plan_id = request.form.get("weekly_plan_id", type=int)
+            action_id = request.form.get("daily_action_id", type=int)
+            plan = db.session.get(WeeklyPlan, plan_id) if plan_id else None
+            action_item = db.session.get(DailyAction, action_id) if action_id else None
+            cadence = request.form.get("cadence", "weekly")
+            due_raw = request.form.get("due_at", "").strip()
+            due_at = None
+            try:
+                due_at = datetime.fromisoformat(due_raw) if due_raw else None
+            except ValueError:
+                pass
+            if not form or form.status != "published" or cadence not in {"daily", "weekly"}:
+                flash("فرم منتشرشده و تناوب معتبر را انتخاب کنید.", "danger")
+            elif ((plan and plan.child_id != child.id)
+                  or (action_item and action_item.plan.child_id != child.id)):
+                abort(400)
+            else:
+                assignment = FormAssignment.query.filter_by(
+                    form_id=form.id, target_type="child", target_id=child.id, status="active"
+                ).first()
+                if not assignment:
+                    assignment = FormAssignment(
+                        form_id=form.id, target_type="child", target_id=child.id,
+                        target_ref=f"growth:{child.id}", title=f"گزارش رشد {child.name}",
+                        due_at=due_at, created_by=current_user.id,
+                    )
+                    db.session.add(assignment)
+                db.session.add(GrowthReportSchedule(
+                    user_id=child.user_id, child_id=child.id, form_id=form.id,
+                    weekly_plan_id=plan.id if plan else None,
+                    daily_action_id=action_item.id if action_item else None,
+                    cadence=cadence, due_at=due_at,
+                ))
+                db.session.commit()
+                flash("گزارش رشد به مسیر فرزند متصل شد.", "success")
+                return redirect(url_for("admin.admin_child_profile", child_id=child.id))
 
     record = profile_record(definition, child.id)
     return render_template(
@@ -2528,6 +2618,11 @@ def admin_child_profile(child_id):
         snapshots=ChildProfileSnapshot.query.filter_by(child_id=child.id).order_by(ChildProfileSnapshot.created_at.desc()).all(),
         recommendations=RecommendationRun.query.filter_by(child_id=child.id).order_by(RecommendationRun.created_at.desc()).all(),
         plans=WeeklyPlan.query.filter_by(child_id=child.id).order_by(WeeklyPlan.created_at.desc()).all(),
+        growth_state=growth_dashboard_state(child.user_id, child.id),
+        growth_timeline=build_growth_timeline(child.user_id, child.id),
+        growth_forms=DynamicForm.query.filter_by(status="published").order_by(DynamicForm.title).all(),
+        growth_schedules=GrowthReportSchedule.query.filter_by(child_id=child.id).order_by(
+            GrowthReportSchedule.created_at.desc()).all(),
     )
 
 
@@ -3324,6 +3419,34 @@ def form_responses(form_id):
         assignments=FormAssignment.query.filter_by(form_id=form.id).order_by(FormAssignment.created_at.desc()).all(),
         parents=User.query.filter_by(role="parent").order_by(User.full_name).all(),
         children=Child.query.order_by(Child.name).all(),
+    )
+
+
+@bp.get("/contracts/<int:contract_id>/growth-report.csv")
+@login_required
+@admin_required
+def contract_growth_report(contract_id):
+    contract = db.get_or_404(OrganizationContract, contract_id)
+    report = contract_aggregate_report(contract)
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(["گزارش تجمیعی قرارداد", contract.contract_no])
+    writer.writerow(["شاخص", "مقدار"])
+    for key, label in (
+        ("parents", "خانواده/والد"), ("children", "فرزند"),
+        ("enrollments", "ثبت‌نام دوره"), ("completed", "دوره تکمیل‌شده"),
+        ("completion_percent", "درصد تکمیل"), ("average_progress", "میانگین پیشرفت"),
+        ("service_usage", "مصرف خدمت"),
+    ):
+        writer.writerow([label, report[key]])
+    writer.writerow(["حریم خصوصی", report["impact"]["message"]])
+    if report["impact"]["available"]:
+        writer.writerow(["تعداد پاسخ تجمیعی", report["impact"]["response_count"]])
+        writer.writerow(["میانگین امتیاز تجمیعی", report["impact"]["average_score"]])
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=contract-{contract.id}-growth.csv"},
     )
 
 

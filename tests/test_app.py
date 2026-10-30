@@ -1,5 +1,6 @@
 import io
 import json
+from datetime import date, timedelta
 
 from app.extensions import db
 from app.models import (
@@ -12,6 +13,7 @@ from app.models import (
     ChildProfileSnapshot,
     ConsentRecord,
     Course,
+    CourseAssessmentBinding,
     CourseChapter,
     CourseEnrollment,
     CourseInvoice,
@@ -29,6 +31,7 @@ from app.models import (
     FormMediaAsset,
     FormResponse,
     FormVersion,
+    GrowthReportSchedule,
     GuardianRelationship,
     HomeActionOutcome,
     MicroLesson,
@@ -62,8 +65,10 @@ from app.models import (
     SmsOutbox,
     CommerceAuditLog,
     IntegrationSetting,
+    JourneyNotification,
     User,
     WeeklyPlan,
+    utcnow,
 )
 from app.course_engine import parse_course_structure, recommended_courses
 from app.commerce import (
@@ -89,6 +94,14 @@ from app.scenario_engine import (
     narrative_to_contract,
     skill_score_summary,
     validate_contract as validate_scenario_contract,
+)
+from app.growth_engine import (
+    build_growth_timeline,
+    contract_aggregate_report,
+    course_assessment_change,
+    explainable_course_recommendations,
+    prioritized_skill_needs,
+    sync_journey_notifications,
 )
 
 from .conftest import login
@@ -2531,4 +2544,199 @@ def test_production_publish_needs_same_snapshot_approval(client, app):
     assert "پس از تأیید علمی همین نسخه" in response.get_data(as_text=True)
     with app.app_context():
         assert db.session.get(ScenarioNarrative, narrative_id).status == "review"
+
+
+def test_stage14_timeline_never_mixes_children(app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        admin = User.query.filter_by(mobile="09120000001").one()
+        first = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        second = Child(user_id=parent.id, name="علی", birth_year=1390, gender="boy")
+        form = DynamicForm(title="گزارش هفتگی", slug="weekly-stage14", status="published", created_by=admin.id)
+        db.session.add_all([first, second, form])
+        db.session.flush()
+        db.session.add_all([
+            FormResponse(form_id=form.id, user_id=parent.id, child_id=first.id,
+                         answers_json="{}", status="submitted", submitted_at=utcnow()),
+            FormResponse(form_id=form.id, user_id=parent.id, child_id=second.id,
+                         answers_json="{}", status="submitted", submitted_at=utcnow()),
+        ])
+        db.session.commit()
+        first_events = build_growth_timeline(parent.id, first.id)
+        assert len(first_events) == 1
+        assert first_events[0]["kind"] == "form"
+
+
+def test_stage14_skill_need_uses_missing_scenario_skills(app):
+    narrative_id, reaction_ids, _topic_id = create_scenario_narrative(app)
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        db.session.add(child)
+        db.session.flush()
+        reaction = db.session.get(ScenarioReaction, reaction_ids[0])
+        db.session.add(ScenarioNarrativeAttempt(
+            user_id=parent.id, child_id=child.id, narrative_id=narrative_id,
+            selected_reaction_id=reaction.id, option_order_json=json.dumps(reaction_ids), score=40,
+        ))
+        db.session.commit()
+        needs = prioritized_skill_needs(parent.id, child.id)
+        assert reaction.missing_skill_ids[0] in {item["skill"].id for item in needs}
+        assert any("تمرین" in reason for item in needs for reason in item["reasons"])
+
+
+def test_stage14_course_recommendation_is_explainable(app):
+    narrative_id, reaction_ids, _topic_id = create_scenario_narrative(app)
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        reaction = db.session.get(ScenarioReaction, reaction_ids[0])
+        course = Course(slug="stage14-explainable", title="دوره توضیح‌پذیر", status="published")
+        db.session.add_all([child, course])
+        db.session.flush()
+        db.session.add_all([
+            CourseSkillMembership(course_id=course.id, skill_id=reaction.missing_skill_ids[0], is_primary=True),
+            ScenarioNarrativeAttempt(user_id=parent.id, child_id=child.id, narrative_id=narrative_id,
+                                     selected_reaction_id=reaction.id,
+                                     option_order_json=json.dumps(reaction_ids), score=30),
+        ])
+        db.session.commit()
+        recommendations = explainable_course_recommendations(parent.id, child.id)
+        selected = next(item for item in recommendations if item["course"].id == course.id)
+        assert selected["reasons"] and selected["evidence"]
+        assert selected["child_id"] == child.id
+
+
+def test_stage14_course_pre_post_change_is_non_diagnostic(app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        admin = User.query.filter_by(mobile="09120000001").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        course = Course(slug="stage14-change", title="دوره تغییر", status="published")
+        pre = DynamicForm(title="قبل", slug="stage14-pre", status="published", created_by=admin.id)
+        post = DynamicForm(title="بعد", slug="stage14-post", status="published", created_by=admin.id)
+        db.session.add_all([child, course, pre, post])
+        db.session.flush()
+        db.session.add_all([
+            CourseAssessmentBinding(course_id=course.id, form_id=pre.id, assessment_type="pre"),
+            CourseAssessmentBinding(course_id=course.id, form_id=post.id, assessment_type="post"),
+            FormResponse(form_id=pre.id, user_id=parent.id, child_id=child.id, answers_json="{}",
+                         status="submitted", score_total=45, submitted_at=utcnow()),
+            FormResponse(form_id=post.id, user_id=parent.id, child_id=child.id, answers_json="{}",
+                         status="submitted", score_total=68, submitted_at=utcnow()),
+        ])
+        db.session.commit()
+        result = course_assessment_change(parent.id, child.id, course.id)
+        assert result["available"] is True
+        assert result["change"] == 23
+        assert "تشخیص" in result["message"]
+
+
+def test_stage14_notifications_are_deduplicated_per_child(app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        course = Course.query.filter_by(status="published").first()
+        db.session.add(child)
+        db.session.flush()
+        db.session.add(CourseEnrollment(course_id=course.id, user_id=parent.id, child_id=child.id))
+        db.session.flush()
+        sync_journey_notifications(parent.id, child.id)
+        db.session.commit()
+        sync_journey_notifications(parent.id, child.id)
+        db.session.commit()
+        assert JourneyNotification.query.filter_by(user_id=parent.id, child_id=child.id).count() == 1
+
+
+def test_stage14_parent_growth_dashboard_and_notification_security(client, app):
+    login(client)
+    client.post("/dashboard/children", data={"name": "سارا", "birth_year": "1392", "gender": "girl"})
+    page = client.get("/dashboard/growth")
+    assert page.status_code == 200
+    assert "اکنون کجا هستم؟" in page.get_data(as_text=True)
+    with app.app_context():
+        admin = User.query.filter_by(mobile="09120000001").one()
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = parent.children[0]
+        foreign = JourneyNotification(user_id=admin.id, child_id=child.id, kind="test", title="محرمانه",
+                                      dedupe_key="foreign-stage14")
+        db.session.add(foreign)
+        db.session.commit()
+        foreign_id = foreign.id
+    assert client.post(f"/dashboard/notifications/{foreign_id}/read").status_code == 404
+
+
+def test_stage14_admin_child_profile_has_360_view(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        db.session.add(child)
+        db.session.commit()
+        child_id = child.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    page = client.get(f"/admin/children/{child_id}/profile")
+    assert page.status_code == 200
+    assert "نمای ۳۶۰ درجه پرونده" in page.get_data(as_text=True)
+
+
+def test_stage14_contract_report_protects_small_groups(client, app):
+    organization_id = create_stage_eight_organization(client, app, name="سازمان گزارش رشد")
+    contract_id = create_stage_eight_contract(client, app, organization_id, contract_no="CNT-STAGE14")
+    page = client.get(f"/admin/contracts/{contract_id}")
+    assert page.status_code == 200
+    assert "حریم خصوصی گروه کوچک" in page.get_data(as_text=True)
+    exported = client.get(f"/admin/contracts/{contract_id}/growth-report.csv")
+    assert exported.status_code == 200
+    assert exported.data.startswith("\ufeff".encode())
+    assert "حریم خصوصی" in exported.get_data(as_text=True)
+
+
+def test_stage14_course_editor_saves_pre_post_bindings(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    with app.app_context():
+        admin = User.query.filter_by(mobile="09120000001").one()
+        forms = [DynamicForm(title=f"سنجش {kind}", slug=f"stage14-{kind}", status="published",
+                             created_by=admin.id) for kind in ("pre", "post")]
+        db.session.add_all(forms)
+        db.session.commit()
+        pre_id, post_id = [item.id for item in forms]
+    response = client.post("/admin/courses/new", data={
+        "action": "save_draft", "title": "دوره استیج چهارده", "slug": "stage14-course",
+        "duration_minutes": "30", "price_toman": "0", "level": "foundation",
+        "structure_json": "[]", "pre_form_id": str(pre_id), "post_form_id": str(post_id),
+    })
+    assert response.status_code == 302
+    with app.app_context():
+        course = Course.query.filter_by(slug="stage14-course").one()
+        assert {item.assessment_type for item in course.assessment_bindings} == {"pre", "post"}
+        assert FormAssignment.query.filter_by(target_type="course", target_ref=str(course.id)).count() == 2
+
+
+def test_stage14_growth_report_schedule_completes_with_form_response(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        admin = User.query.filter_by(mobile="09120000001").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        form = DynamicForm(title="گزارش هفتگی رشد", slug="stage14-growth-report",
+                           status="published", created_by=admin.id)
+        db.session.add_all([child, form])
+        db.session.commit()
+        child_id, form_id = child.id, form.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    scheduled = client.post(f"/admin/children/{child_id}/profile", data={
+        "action": "schedule_growth_report", "form_id": str(form_id), "cadence": "weekly",
+    })
+    assert scheduled.status_code == 302
+    client.post("/auth/logout")
+    login(client)
+    with app.app_context():
+        assignment = FormAssignment.query.filter_by(form_id=form_id, target_type="child",
+                                                     target_id=child_id).one()
+        assignment_id = assignment.id
+    submitted = client.post(f"/dashboard/forms/{assignment_id}", data={"action": "submit"})
+    assert submitted.status_code == 302
+    with app.app_context():
+        schedule = GrowthReportSchedule.query.one()
+        assert schedule.status == "completed"
+        assert schedule.completed_response_id is not None
 
