@@ -4,7 +4,16 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from .extensions import db
-from .models import ConsentRecord, User
+from .models import (
+    ContractBeneficiary,
+    FormResponse,
+    ParentingStyleAssessment,
+    RecommendationRun,
+    User,
+    WeeklyPlan,
+    ConsentRecord,
+)
+from .profiles import active_profile_definition, profile_record, profile_sections, save_profile_values
 from .security import normalize_mobile, valid_mobile
 
 
@@ -100,14 +109,54 @@ def logout():
 @bp.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
+    definition = active_profile_definition("guardian")
     if request.method == "POST":
-        full_name = request.form.get("full_name", "").strip()
-        if len(full_name) < 3:
-            flash("نام و نام خانوادگی را کامل وارد کنید.", "danger")
+        action = request.form.get("action", "update_basic")
+        if action == "save_profile" and definition:
+            _record, errors = save_profile_values(
+                definition, current_user.id, request.form, current_user.id
+            )
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                db.session.commit()
+                flash("فیلدهای تکمیلی پروفایل ذخیره شد.", "success")
+                return redirect(url_for("auth.profile"))
         else:
-            current_user.full_name = full_name
-            db.session.commit()
-            flash("پروفایل شما به‌روزرسانی شد.", "success")
-            return redirect(url_for("auth.profile"))
-    return render_template("auth/profile.html")
+            full_name = request.form.get("full_name", "").strip()
+            national_id = request.form.get("national_id", "").strip()[:10]
+            duplicate = User.query.filter(
+                User.national_id == national_id, User.id != current_user.id
+            ).first() if national_id else None
+            if len(full_name) < 3:
+                flash("نام و نام خانوادگی را کامل وارد کنید.", "danger")
+            elif duplicate:
+                flash("کد ملی برای حساب دیگری ثبت شده است.", "danger")
+            else:
+                current_user.full_name = full_name
+                current_user.national_id = national_id
+                current_user.email = request.form.get("email", "").strip()[:160]
+                db.session.commit()
+                flash("پروفایل شما به‌روزرسانی شد.", "success")
+                return redirect(url_for("auth.profile"))
+    record = profile_record(definition, current_user.id)
+    organization_values = {
+        membership.project.organization.id: membership.project.organization
+        for membership in current_user.project_memberships
+    }
+    for beneficiary in ContractBeneficiary.query.filter_by(user_id=current_user.id).all():
+        organization_values[beneficiary.contract.organization_id] = beneficiary.contract.organization
+    return render_template(
+        "auth/profile.html",
+        definition=definition,
+        record=record,
+        profile_sections=profile_sections(definition, record),
+        family_children={child.id: child for child in current_user.children + [link.child for link in current_user.guardian_links if link.status == 'active']}.values(),
+        organizations=sorted(organization_values.values(), key=lambda item: item.name),
+        style_results=ParentingStyleAssessment.query.filter_by(user_id=current_user.id).order_by(ParentingStyleAssessment.created_at.desc()).all(),
+        form_responses=FormResponse.query.filter_by(user_id=current_user.id).order_by(FormResponse.created_at.desc()).all(),
+        recommendations=RecommendationRun.query.filter_by(user_id=current_user.id).order_by(RecommendationRun.created_at.desc()).limit(20).all(),
+        plans=WeeklyPlan.query.filter_by(user_id=current_user.id).order_by(WeeklyPlan.created_at.desc()).limit(20).all(),
+    )
 

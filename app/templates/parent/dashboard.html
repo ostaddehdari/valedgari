@@ -19,7 +19,7 @@
     <div class="row g-4 mt-1">
       <div class="col-md-4"><a class="dashboard-tile teal" href="{{ url_for('parent.journey') }}"><span><i class="fa-solid fa-calendar-week"></i></span><div><small>مسیر منسجم</small><h3>{{ active_plan.completed_count|string + ' از ۷ قدم' if active_plan else 'برنامه این هفته' }}</h3><p>{{ 'ادامه اقدام امروز' if active_plan else 'یک هدف، قدم‌های کوتاه' }}</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
       <div class="col-md-4"><a class="dashboard-tile coral" href="{{ url_for('parent.scenario') }}"><span><i class="fa-solid fa-route"></i></span><div><small>موقعیت‌ها</small><h3>انتخاب شدت و پاسخ</h3><p>قبل از واکنش تمرین کنید</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
-      <div class="col-md-4"><a class="dashboard-tile gold" href="{{ url_for('parent.children') }}"><span><i class="fa-solid fa-folder-open"></i></span><div><small>پرونده خانواده</small><h3>{{ current_user.children|length }} فرزند</h3><p>افزودن یا مرور پرونده‌ها</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
+      <div class="col-md-4"><a class="dashboard-tile gold" href="{{ url_for('parent.children') }}"><span><i class="fa-solid fa-folder-open"></i></span><div><small>پرونده خانواده</small><h3>{{ family_children|length }} فرزند</h3><p>افزودن یا مرور پرونده‌ها</p></div><i class="fa-solid fa-chevron-left"></i></a></div>
     </div>
   {% endif %}
 </div>

@@ -14,6 +14,8 @@ from app.models import (
     DataDeletionRequest,
     DailyAction,
     DynamicForm,
+    FormResponse,
+    GuardianRelationship,
     HomeActionOutcome,
     MicroLesson,
     Organization,
@@ -24,6 +26,9 @@ from app.models import (
     PaymentAllocation,
     ProjectAuditLog,
     ProjectMembership,
+    ProfileDefinition,
+    ProfileFormBinding,
+    ProfileRecord,
     PlanReview,
     RecommendationRun,
     SafetyProtocol,
@@ -1153,4 +1158,304 @@ def test_organization_report_contains_covered_child(client, app):
     text = report.get_data(as_text=True)
     assert "علی" in text
     assert "09120000002" in text
+
+
+def test_stage_nine_seeds_three_independent_profile_definitions(app):
+    with app.app_context():
+        definitions = ProfileDefinition.query.filter_by(status="active").all()
+        assert {item.profile_type for item in definitions} == {
+            "organization",
+            "guardian",
+            "child",
+        }
+        assert all(item.version == 1 for item in definitions)
+        assert len({item.id for item in definitions}) == 3
+
+
+def test_profile_schema_only_binds_published_form_and_saves_guardian_fields(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        published = DynamicForm(
+            title="اطلاعات تکمیلی والد",
+            slug="guardian-extra",
+            status="published",
+            schema_json=json.dumps(
+                [
+                    {"id": "job", "type": "text", "label": "شغل", "required": True},
+                    {"id": "education", "type": "select", "label": "تحصیلات", "options": ["دیپلم", "دانشگاهی"]},
+                ],
+                ensure_ascii=False,
+            ),
+            created_by=admin.id,
+        )
+        draft = DynamicForm(
+            title="فرم پیش‌نویس",
+            slug="guardian-draft",
+            status="draft",
+            schema_json=json.dumps([{"id": "x", "type": "text", "label": "X"}]),
+            created_by=admin.id,
+        )
+        db.session.add_all([published, draft])
+        db.session.commit()
+        definition = ProfileDefinition.query.filter_by(
+            profile_type="guardian", status="active"
+        ).one()
+        definition_id, published_id, draft_id = definition.id, published.id, draft.id
+
+    login(client, mobile="09120000001", password="AdminPass123")
+    rejected = client.post(
+        "/admin/profile-schemas",
+        data={
+            "action": "bind_form",
+            "definition_id": definition_id,
+            "form_id": draft_id,
+            "section_title": "نباید متصل شود",
+        },
+        follow_redirects=True,
+    )
+    assert "فقط فرم منتشرشده" in rejected.get_data(as_text=True)
+    accepted = client.post(
+        "/admin/profile-schemas",
+        data={
+            "action": "bind_form",
+            "definition_id": definition_id,
+            "form_id": published_id,
+            "section_title": "اطلاعات شغلی",
+            "section_key": "work",
+            "sort_order": "2",
+        },
+    )
+    assert accepted.status_code == 302
+    client.post("/auth/logout")
+
+    login(client)
+    page = client.get("/auth/profile")
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "اطلاعات شغلی" in html
+    with app.app_context():
+        binding = ProfileFormBinding.query.filter_by(
+            definition_id=definition_id, form_id=published_id
+        ).one()
+        binding_id = binding.id
+        job_input = f"profile_{binding_id}_job"
+        education_input = f"profile_{binding_id}_education"
+        parent_id = User.query.filter_by(mobile="09120000002").one().id
+    saved = client.post(
+        "/auth/profile",
+        data={
+            "action": "save_profile",
+            job_input: "روان‌شناس",
+            education_input: "دانشگاهی",
+        },
+    )
+    assert saved.status_code == 302
+    with app.app_context():
+        record = ProfileRecord.query.filter_by(
+            definition_id=definition_id, subject_id=parent_id
+        ).one()
+        assert record.values[f"{binding_id}:job"] == "روان‌شناس"
+        assert record.values[f"{binding_id}:education"] == "دانشگاهی"
+
+
+def test_new_profile_version_clones_bindings_and_archives_previous(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        form = DynamicForm(
+            title="فرم فرزند",
+            slug="child-profile-form",
+            status="published",
+            schema_json=json.dumps([{"id": "interest", "type": "text", "label": "علاقه"}]),
+            created_by=admin.id,
+        )
+        db.session.add(form)
+        db.session.flush()
+        definition = ProfileDefinition.query.filter_by(
+            profile_type="child", status="active"
+        ).one()
+        binding = ProfileFormBinding(
+            definition_id=definition.id,
+            form_id=form.id,
+            section_key="identity",
+            section_title="شناخت فرزند",
+            sort_order=1,
+        )
+        db.session.add(binding)
+        db.session.flush()
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="آرین", birth_year=1392, gender="boy")
+        db.session.add(child)
+        db.session.flush()
+        db.session.add(
+            ProfileRecord(
+                definition_id=definition.id,
+                subject_id=child.id,
+                values_json=json.dumps({f"{binding.id}:interest": "نقاشی"}, ensure_ascii=False),
+            )
+        )
+        db.session.commit()
+        old_id, child_id = definition.id, child.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.post(
+        "/admin/profile-schemas",
+        data={"action": "new_version", "profile_type": "child"},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        old = db.session.get(ProfileDefinition, old_id)
+        new = ProfileDefinition.query.filter_by(
+            profile_type="child", status="active"
+        ).one()
+        assert old.status == "archived"
+        assert new.version == 2
+        assert len(new.bindings) == 1
+        assert new.bindings[0].section_title == "شناخت فرزند"
+        migrated = ProfileRecord.query.filter_by(
+            definition_id=new.id, subject_id=child_id
+        ).one()
+        assert migrated.values[f"{new.bindings[0].id}:interest"] == "نقاشی"
+        assert migrated.record_version == 2
+
+
+def test_multiple_guardians_and_child_profile_idor(client, app):
+    login(client)
+    client.post(
+        "/dashboard/children",
+        data={
+            "name": "زهرا",
+            "birth_year": "1392",
+            "gender": "girl",
+            "relationship_type": "mother",
+        },
+    )
+    client.post("/auth/logout")
+    with app.app_context():
+        father = User(full_name="پدر زهرا", mobile="09120000003", role="parent")
+        father.set_password("FatherPass123")
+        stranger = User(full_name="والد بیگانه", mobile="09120000004", role="parent")
+        stranger.set_password("StrangerPass123")
+        db.session.add_all([father, stranger])
+        db.session.commit()
+        child = Child.query.filter_by(name="زهرا").one()
+        child_id = child.id
+
+    login(client, mobile="09120000001", password="AdminPass123")
+    added = client.post(
+        f"/admin/children/{child_id}/profile",
+        data={
+            "action": "add_guardian",
+            "mobile": "09120000003",
+            "relationship_type": "father",
+            "access_level": "full",
+            "status": "active",
+        },
+    )
+    assert added.status_code == 302
+    client.post("/auth/logout")
+    login(client, mobile="09120000003", password="FatherPass123")
+    allowed = client.get(f"/dashboard/children/{child_id}/profile")
+    assert allowed.status_code == 200
+    assert "پروفایل زهرا" in allowed.get_data(as_text=True)
+    client.post("/auth/logout")
+    login(client, mobile="09120000004", password="StrangerPass123")
+    assert client.get(f"/dashboard/children/{child_id}/profile").status_code == 404
+
+
+def test_owner_guardian_cannot_be_revoked_but_secondary_can(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        secondary = User(full_name="سرپرست دوم", mobile="09120000005", role="parent")
+        secondary.set_password("SecondPass123")
+        child = Child(user_id=parent.id, name="علی", birth_year=1391, gender="boy")
+        db.session.add_all([secondary, child])
+        db.session.flush()
+        owner_link = GuardianRelationship(
+            child_id=child.id,
+            guardian_id=parent.id,
+            relationship_type="mother",
+            access_level="full",
+            status="active",
+        )
+        second_link = GuardianRelationship(
+            child_id=child.id,
+            guardian_id=secondary.id,
+            relationship_type="guardian",
+            access_level="full",
+            status="active",
+        )
+        db.session.add_all([owner_link, second_link])
+        db.session.commit()
+        child_id, owner_link_id, second_link_id = child.id, owner_link.id, second_link.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    blocked = client.post(
+        f"/admin/children/{child_id}/profile",
+        data={"action": "revoke_guardian", "relationship_id": owner_link_id},
+        follow_redirects=True,
+    )
+    assert "مالک اصلی" in blocked.get_data(as_text=True)
+    revoked = client.post(
+        f"/admin/children/{child_id}/profile",
+        data={"action": "revoke_guardian", "relationship_id": second_link_id},
+    )
+    assert revoked.status_code == 302
+    with app.app_context():
+        assert db.session.get(GuardianRelationship, owner_link_id).status == "active"
+        assert db.session.get(GuardianRelationship, second_link_id).status == "revoked"
+
+
+def test_admin_directory_searches_national_id_and_links_profiles(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        parent.national_id = "0012345678"
+        child = Child(
+            user_id=parent.id,
+            name="نگار",
+            national_id="0098765432",
+            birth_year=1393,
+            gender="girl",
+        )
+        db.session.add(child)
+        db.session.commit()
+        parent_id, child_id = parent.id, child.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    parent_page = client.get("/admin/users?q=0012345678")
+    child_page = client.get("/admin/users?q=0098765432")
+    assert parent_page.status_code == child_page.status_code == 200
+    assert f'/admin/guardians/{parent_id}' in parent_page.get_data(as_text=True)
+    assert f'/admin/children/{child_id}/profile' in child_page.get_data(as_text=True)
+
+
+def test_parent_cannot_open_admin_profile_routes(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="سارا", birth_year=1392, gender="girl")
+        db.session.add(child)
+        db.session.commit()
+        parent_id, child_id = parent.id, child.id
+    login(client)
+    assert client.get("/admin/profile-schemas").status_code == 403
+    assert client.get(f"/admin/guardians/{parent_id}").status_code == 403
+    assert client.get(f"/admin/children/{child_id}/profile").status_code == 403
+
+
+def test_admin_and_parent_unified_profile_pages_render(client, app):
+    with app.app_context():
+        parent = User.query.filter_by(mobile="09120000002").one()
+        child = Child(user_id=parent.id, name="رها", birth_year=1394, gender="girl")
+        db.session.add(child)
+        db.session.commit()
+        parent_id, child_id = parent.id, child.id
+    login(client, mobile="09120000001", password="AdminPass123")
+    guardian_page = client.get(f"/admin/guardians/{parent_id}")
+    child_page = client.get(f"/admin/children/{child_id}/profile")
+    assert guardian_page.status_code == child_page.status_code == 200
+    assert "پروفایل والد/سرپرست" in guardian_page.get_data(as_text=True)
+    assert "والدین و سرپرستان" in child_page.get_data(as_text=True)
+    client.post("/auth/logout")
+    login(client)
+    self_page = client.get("/auth/profile")
+    family_page = client.get(f"/dashboard/children/{child_id}/profile")
+    assert self_page.status_code == family_page.status_code == 200
+    assert "پرونده یکپارچه" in self_page.get_data(as_text=True)
+    assert "پروفایل رها" in family_page.get_data(as_text=True)
 

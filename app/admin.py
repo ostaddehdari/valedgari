@@ -24,6 +24,7 @@ from .models import (
     DecisionNode,
     DynamicForm,
     FormResponse,
+    GuardianRelationship,
     Organization,
     OrganizationAuditLog,
     OrganizationContract,
@@ -31,6 +32,9 @@ from .models import (
     ParentingAssessment,
     ParentingStyleAssessment,
     PersonalizationRule,
+    ProfileDefinition,
+    ProfileFormBinding,
+    ProfileRecord,
     ProjectAuditLog,
     ProjectMembership,
     ScenarioAttempt,
@@ -60,6 +64,13 @@ from .governance import (
     resource_version,
 )
 from .security import admin_required, scientific_staff_required
+from .profiles import (
+    PROFILE_TYPES,
+    active_profile_definition,
+    profile_record,
+    profile_sections,
+    save_profile_values,
+)
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -214,6 +225,15 @@ def delete_child_records(child):
         ChildProfileSnapshot,
     ):
         model.query.filter_by(child_id=child_id).delete(synchronize_session=False)
+    GuardianRelationship.query.filter_by(child_id=child_id).delete(synchronize_session=False)
+    child_definition_ids = [
+        item.id for item in ProfileDefinition.query.filter_by(profile_type="child").all()
+    ]
+    if child_definition_ids:
+        ProfileRecord.query.filter(
+            ProfileRecord.definition_id.in_(child_definition_ids),
+            ProfileRecord.subject_id == child_id,
+        ).delete(synchronize_session=False)
     db.session.delete(child)
 
 
@@ -1029,6 +1049,26 @@ def organization_detail(organization_id):
                 db.session.commit()
                 flash("فیلدهای پویا در پروفایل سازمان ذخیره شد.", "success")
                 return redirect(url_for("admin.organization_detail", organization_id=organization.id))
+        elif action == "save_unified_profile":
+            definition = active_profile_definition("organization")
+            if not definition:
+                flash("تعریف فعال پروفایل سازمان پیدا نشد.", "danger")
+            else:
+                _record, errors = save_profile_values(
+                    definition, organization.id, request.form, current_user.id
+                )
+                if errors:
+                    for error in errors:
+                        flash(error, "danger")
+                else:
+                    audit_organization(
+                        organization,
+                        "organization_unified_profile_updated",
+                        {"definition_version": definition.version},
+                    )
+                    db.session.commit()
+                    flash("پروفایل یکپارچه سازمان ذخیره شد.", "success")
+                    return redirect(url_for("admin.organization_detail", organization_id=organization.id))
         elif action == "create_contract":
             values, errors = contract_form_values()
             if errors:
@@ -1089,6 +1129,8 @@ def organization_detail(organization_id):
         "committed": sum(contract.committed_amount_toman for contract in contracts),
         "paid": sum(contract.amount_paid_toman for contract in contracts),
     }
+    unified_definition = active_profile_definition("organization")
+    unified_record = profile_record(unified_definition, organization.id)
     return render_template(
         "admin/organization_detail.html",
         organization=organization,
@@ -1096,6 +1138,9 @@ def organization_detail(organization_id):
         forms=forms,
         covered_children=sorted(children, key=lambda item: item.name),
         totals=totals,
+        unified_definition=unified_definition,
+        unified_record=unified_record,
+        unified_profile_sections=profile_sections(unified_definition, unified_record),
     )
 
 
@@ -1556,13 +1601,373 @@ def project_impact_export(project_id):
     )
 
 
+def guardian_organizations(user):
+    values = {
+        membership.project.organization.id: membership.project.organization
+        for membership in user.project_memberships
+    }
+    for beneficiary in ContractBeneficiary.query.filter_by(user_id=user.id).all():
+        values[beneficiary.contract.organization_id] = beneficiary.contract.organization
+    return sorted(values.values(), key=lambda item: item.name)
+
+
+def child_contracts(child):
+    values = {
+        beneficiary.contract_id: beneficiary.contract
+        for beneficiary in ContractBeneficiary.query.filter_by(child_id=child.id).all()
+    }
+    guardian_ids = {child.user_id}
+    guardian_ids.update(
+        link.guardian_id for link in child.guardian_links if link.status == "active"
+    )
+    for membership in ProjectMembership.query.filter(
+        ProjectMembership.user_id.in_(guardian_ids)
+    ).all():
+        if membership.project.contract:
+            values[membership.project.contract_id] = membership.project.contract
+    return sorted(values.values(), key=lambda item: item.created_at, reverse=True)
+
+
+@bp.route("/profile-schemas", methods=["GET", "POST"])
+@login_required
+@admin_required
+def profile_schemas():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "bind_form":
+            definition = db.session.get(
+                ProfileDefinition, request.form.get("definition_id", type=int)
+            )
+            form = db.session.get(DynamicForm, request.form.get("form_id", type=int))
+            if not definition or not form:
+                flash("تعریف پروفایل یا فرم معتبر نیست.", "danger")
+            elif form.status != "published":
+                flash("فقط فرم منتشرشده را می‌توان به پروفایل متصل کرد.", "danger")
+            elif ProfileFormBinding.query.filter_by(
+                definition_id=definition.id, form_id=form.id
+            ).first():
+                flash("این فرم قبلاً به نسخه پروفایل متصل شده است.", "warning")
+            else:
+                binding = ProfileFormBinding(
+                    definition_id=definition.id,
+                    form_id=form.id,
+                    section_key=request.form.get("section_key", "general").strip()[:80] or "general",
+                    section_title=request.form.get("section_title", "").strip()[:160]
+                    or form.title,
+                    sort_order=max(0, request.form.get("sort_order", 0, type=int)),
+                )
+                db.session.add(binding)
+                db.session.commit()
+                flash("فرم منتشرشده به پروفایل متصل شد.", "success")
+                return redirect(url_for("admin.profile_schemas"))
+        elif action == "toggle_binding":
+            binding = db.session.get(
+                ProfileFormBinding, request.form.get("binding_id", type=int)
+            )
+            if not binding:
+                abort(404)
+            binding.is_active = not binding.is_active
+            db.session.commit()
+            flash("وضعیت اتصال فرم تغییر کرد.", "info")
+            return redirect(url_for("admin.profile_schemas"))
+        elif action == "new_version":
+            profile_type = request.form.get("profile_type", "")
+            current = active_profile_definition(profile_type)
+            if profile_type not in PROFILE_TYPES or not current:
+                flash("نوع پروفایل معتبر نیست.", "danger")
+            else:
+                current.status = "archived"
+                new_definition = ProfileDefinition(
+                    profile_type=profile_type,
+                    title=current.title,
+                    version=current.version + 1,
+                    status="active",
+                    created_by=current_user.id,
+                )
+                db.session.add(new_definition)
+                db.session.flush()
+                binding_map = {}
+                for item in current.bindings:
+                    cloned_binding = ProfileFormBinding(
+                        definition_id=new_definition.id,
+                        form_id=item.form_id,
+                        section_key=item.section_key,
+                        section_title=item.section_title,
+                        sort_order=item.sort_order,
+                        is_active=item.is_active,
+                    )
+                    db.session.add(cloned_binding)
+                    db.session.flush()
+                    binding_map[str(item.id)] = str(cloned_binding.id)
+                for old_record in current.records:
+                    migrated_values = {}
+                    for key, value in old_record.values.items():
+                        binding_id, separator, field_id = key.partition(":")
+                        if separator and binding_id in binding_map:
+                            migrated_values[f"{binding_map[binding_id]}:{field_id}"] = value
+                    db.session.add(
+                        ProfileRecord(
+                            definition_id=new_definition.id,
+                            subject_id=old_record.subject_id,
+                            values_json=json.dumps(migrated_values, ensure_ascii=False),
+                            record_version=old_record.record_version + 1,
+                            updated_by=current_user.id,
+                        )
+                    )
+                db.session.commit()
+                flash(
+                    f"نسخه {new_definition.version} پروفایل با حفظ داده‌های قبلی ساخته شد.",
+                    "success",
+                )
+                return redirect(url_for("admin.profile_schemas"))
+
+    definitions = {
+        profile_type: active_profile_definition(profile_type)
+        for profile_type in PROFILE_TYPES
+    }
+    forms = DynamicForm.query.filter_by(status="published").order_by(DynamicForm.title).all()
+    return render_template(
+        "admin/profile_schemas.html",
+        definitions=definitions,
+        forms=forms,
+        profile_types=PROFILE_TYPES,
+    )
+
+
 @bp.get("/users")
 @login_required
 @admin_required
 def users():
-    page = max(1, request.args.get("page", 1, type=int))
-    pagination = User.query.order_by(User.created_at.desc()).paginate(page=page, per_page=20)
-    return render_template("admin/users.html", pagination=pagination)
+    search = request.args.get("q", "").strip()
+    organization_id = request.args.get("organization_id", type=int)
+    user_query = User.query
+    child_query = Child.query
+    if search:
+        normalized = normalize_digits(search)
+        user_query = user_query.filter(
+            or_(
+                User.full_name.contains(search),
+                User.mobile.contains(normalized),
+                User.national_id.contains(normalized),
+            )
+        )
+        child_query = child_query.filter(
+            or_(Child.name.contains(search), Child.national_id.contains(normalized))
+        )
+    if organization_id:
+        user_ids = {
+            item.user_id
+            for item in ProjectMembership.query.join(SponsoredProject).filter(
+                SponsoredProject.organization_id == organization_id
+            )
+        }
+        user_ids.update(
+            item.user_id
+            for item in ContractBeneficiary.query.join(OrganizationContract).filter(
+                OrganizationContract.organization_id == organization_id,
+                ContractBeneficiary.user_id.isnot(None),
+            )
+        )
+        child_ids = {
+            item.child_id
+            for item in ContractBeneficiary.query.join(OrganizationContract).filter(
+                OrganizationContract.organization_id == organization_id,
+                ContractBeneficiary.child_id.isnot(None),
+            )
+        }
+        child_ids.update(
+            child.id for user_id in user_ids for child in db.session.get(User, user_id).children
+        )
+        user_query = user_query.filter(User.id.in_(user_ids or {-1}))
+        child_query = child_query.filter(Child.id.in_(child_ids or {-1}))
+    user_rows = user_query.order_by(User.created_at.desc()).limit(250).all()
+    child_rows = child_query.order_by(Child.created_at.desc()).limit(250).all()
+    return render_template(
+        "admin/users.html",
+        users=user_rows,
+        children=child_rows,
+        organizations=Organization.query.order_by(Organization.name).all(),
+        search=search,
+        selected_organization_id=organization_id,
+    )
+
+
+@bp.route("/guardians/<int:user_id>", methods=["GET", "POST"])
+@login_required
+@admin_required
+def guardian_profile(user_id):
+    guardian = db.get_or_404(User, user_id)
+    if guardian.role != "parent":
+        abort(404)
+    definition = active_profile_definition("guardian")
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "update_basic":
+            full_name = request.form.get("full_name", "").strip()
+            national_id = normalize_digits(request.form.get("national_id", ""))[:10]
+            if len(full_name) < 3:
+                flash("نام و نام خانوادگی را کامل وارد کنید.", "danger")
+            elif national_id and User.query.filter(
+                User.national_id == national_id, User.id != guardian.id
+            ).first():
+                flash("کد ملی قبلاً برای کاربر دیگری ثبت شده است.", "danger")
+            else:
+                guardian.full_name = full_name
+                guardian.national_id = national_id
+                guardian.email = request.form.get("email", "").strip()[:160]
+                guardian.is_active_account = request.form.get("is_active") == "1"
+                db.session.commit()
+                flash("اطلاعات پایه والد ذخیره شد.", "success")
+                return redirect(url_for("admin.guardian_profile", user_id=guardian.id))
+        elif action == "save_profile" and definition:
+            _record, errors = save_profile_values(
+                definition, guardian.id, request.form, current_user.id
+            )
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                db.session.commit()
+                flash("فیلدهای پویای پروفایل والد ذخیره شد.", "success")
+                return redirect(url_for("admin.guardian_profile", user_id=guardian.id))
+
+    record = profile_record(definition, guardian.id)
+    style_results = ParentingStyleAssessment.query.filter_by(user_id=guardian.id).order_by(
+        ParentingStyleAssessment.created_at.desc()
+    ).all()
+    form_responses = FormResponse.query.filter_by(user_id=guardian.id).order_by(
+        FormResponse.created_at.desc()
+    ).all()
+    reports = RecommendationRun.query.filter_by(user_id=guardian.id).order_by(
+        RecommendationRun.created_at.desc()
+    ).all()
+    plans = WeeklyPlan.query.filter_by(user_id=guardian.id).order_by(
+        WeeklyPlan.created_at.desc()
+    ).all()
+    return render_template(
+        "admin/guardian_profile.html",
+        guardian=guardian,
+        family_children=sorted(
+            {item.id: item for item in guardian.children + [link.child for link in guardian.guardian_links if link.status == 'active']}.values(),
+            key=lambda item: item.name,
+        ),
+        organizations=guardian_organizations(guardian),
+        definition=definition,
+        record=record,
+        profile_sections=profile_sections(definition, record),
+        style_results=style_results,
+        form_responses=form_responses,
+        reports=reports,
+        plans=plans,
+        allocations=[allocation for membership in guardian.project_memberships for allocation in membership.allocations],
+    )
+
+
+@bp.route("/children/<int:child_id>/profile", methods=["GET", "POST"])
+@login_required
+@admin_required
+def admin_child_profile(child_id):
+    child = db.get_or_404(Child, child_id)
+    if not GuardianRelationship.query.filter_by(
+        child_id=child.id, guardian_id=child.user_id
+    ).first():
+        db.session.add(
+            GuardianRelationship(
+                child_id=child.id,
+                guardian_id=child.user_id,
+                relationship_type="guardian",
+                access_level="full",
+                status="active",
+                accepted_at=child.created_at,
+            )
+        )
+        db.session.commit()
+    definition = active_profile_definition("child")
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "update_basic":
+            child.name = request.form.get("name", "").strip()[:80]
+            child.national_id = normalize_digits(request.form.get("national_id", ""))[:10]
+            child.birth_year = request.form.get("birth_year", child.birth_year, type=int)
+            child.gender = request.form.get("gender", "unspecified")
+            child.notes = request.form.get("notes", "").strip()[:400]
+            if len(child.name) < 2:
+                flash("نام فرزند معتبر نیست.", "danger")
+            else:
+                db.session.commit()
+                flash("اطلاعات پایه فرزند ذخیره شد.", "success")
+                return redirect(url_for("admin.admin_child_profile", child_id=child.id))
+        elif action == "save_profile" and definition:
+            _record, errors = save_profile_values(
+                definition, child.id, request.form, current_user.id
+            )
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                db.session.commit()
+                flash("فیلدهای پویای پروفایل فرزند ذخیره شد.", "success")
+                return redirect(url_for("admin.admin_child_profile", child_id=child.id))
+        elif action == "add_guardian":
+            mobile = normalize_digits(request.form.get("mobile", ""))
+            guardian = User.query.filter_by(mobile=mobile, role="parent").first()
+            relationship_type = request.form.get("relationship_type", "guardian")
+            access_level = request.form.get("access_level", "full")
+            status = request.form.get("status", "pending")
+            if not guardian:
+                flash("والدی با این شماره موبایل پیدا نشد.", "danger")
+            elif relationship_type not in {"mother", "father", "guardian"} or access_level not in {"full", "view", "limited"}:
+                flash("نوع رابطه یا سطح دسترسی معتبر نیست.", "danger")
+            else:
+                link = GuardianRelationship.query.filter_by(
+                    child_id=child.id, guardian_id=guardian.id
+                ).first()
+                if not link:
+                    link = GuardianRelationship(
+                        child_id=child.id,
+                        guardian_id=guardian.id,
+                        invited_by=current_user.id,
+                    )
+                    db.session.add(link)
+                link.relationship_type = relationship_type
+                link.access_level = access_level
+                link.status = status if status in {"pending", "active"} else "pending"
+                link.accepted_at = utcnow() if link.status == "active" else None
+                link.ended_at = None
+                db.session.commit()
+                flash("رابطه سرپرستی ثبت شد.", "success")
+                return redirect(url_for("admin.admin_child_profile", child_id=child.id))
+        elif action == "revoke_guardian":
+            link = db.session.get(
+                GuardianRelationship, request.form.get("relationship_id", type=int)
+            )
+            if not link or link.child_id != child.id:
+                abort(404)
+            if link.guardian_id == child.user_id:
+                flash("رابطه مالک اصلی پرونده قابل لغو نیست.", "danger")
+            else:
+                link.status = "revoked"
+                link.ended_at = utcnow()
+                db.session.commit()
+                flash("دسترسی سرپرست لغو شد؛ سابقه رابطه حفظ گردید.", "info")
+            return redirect(url_for("admin.admin_child_profile", child_id=child.id))
+
+    record = profile_record(definition, child.id)
+    return render_template(
+        "admin/child_profile.html",
+        child=child,
+        definition=definition,
+        record=record,
+        profile_sections=profile_sections(definition, record),
+        relationships=child.guardian_links,
+        contracts=child_contracts(child),
+        assessments=ParentingAssessment.query.filter_by(child_id=child.id).order_by(ParentingAssessment.created_at.desc()).all(),
+        style_results=ParentingStyleAssessment.query.filter_by(child_id=child.id).order_by(ParentingStyleAssessment.created_at.desc()).all(),
+        form_responses=FormResponse.query.filter_by(child_id=child.id).order_by(FormResponse.created_at.desc()).all(),
+        snapshots=ChildProfileSnapshot.query.filter_by(child_id=child.id).order_by(ChildProfileSnapshot.created_at.desc()).all(),
+        recommendations=RecommendationRun.query.filter_by(child_id=child.id).order_by(RecommendationRun.created_at.desc()).all(),
+        plans=WeeklyPlan.query.filter_by(child_id=child.id).order_by(WeeklyPlan.created_at.desc()).all(),
+    )
 
 
 @bp.route("/tree", methods=["GET", "POST"])

@@ -17,6 +17,8 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     mobile = db.Column(db.String(11), unique=True, nullable=False, index=True)
     full_name = db.Column(db.String(120), nullable=False)
+    national_id = db.Column(db.String(10), nullable=False, default="", index=True)
+    email = db.Column(db.String(160), nullable=False, default="")
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="parent", index=True)
     is_active_account = db.Column(db.Boolean, nullable=False, default=True)
@@ -27,6 +29,13 @@ class User(UserMixin, db.Model):
     )
     project_memberships = db.relationship(
         "ProjectMembership", backref="parent", lazy=True, cascade="all, delete-orphan"
+    )
+    guardian_links = db.relationship(
+        "GuardianRelationship",
+        foreign_keys="GuardianRelationship.guardian_id",
+        backref="guardian",
+        lazy=True,
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -57,10 +66,36 @@ class Child(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     name = db.Column(db.String(80), nullable=False)
+    national_id = db.Column(db.String(10), nullable=False, default="", index=True)
     birth_year = db.Column(db.Integer, nullable=False)
     gender = db.Column(db.String(20), nullable=False, default="unspecified")
     notes = db.Column(db.String(400), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    guardian_links = db.relationship(
+        "GuardianRelationship",
+        foreign_keys="GuardianRelationship.child_id",
+        backref="child",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="GuardianRelationship.created_at",
+    )
+
+
+class GuardianRelationship(db.Model):
+    __tablename__ = "guardian_relationships"
+    id = db.Column(db.Integer, primary_key=True)
+    child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False, index=True)
+    guardian_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    relationship_type = db.Column(db.String(20), nullable=False, default="guardian", index=True)
+    access_level = db.Column(db.String(20), nullable=False, default="full", index=True)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    invited_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    accepted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    ended_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (db.UniqueConstraint("child_id", "guardian_id"),)
 
 
 class ParentingAssessment(db.Model):
@@ -448,6 +483,78 @@ class FormResponse(db.Model):
     child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=True)
     answers_json = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    form = db.relationship("DynamicForm")
+    child = db.relationship("Child")
+
+
+class ProfileDefinition(db.Model):
+    __tablename__ = "profile_definitions"
+    id = db.Column(db.Integer, primary_key=True)
+    profile_type = db.Column(db.String(30), nullable=False, index=True)
+    title = db.Column(db.String(160), nullable=False)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    bindings = db.relationship(
+        "ProfileFormBinding",
+        backref="definition",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ProfileFormBinding.sort_order",
+    )
+    records = db.relationship(
+        "ProfileRecord", backref="definition", lazy=True, cascade="all, delete-orphan"
+    )
+    __table_args__ = (db.UniqueConstraint("profile_type", "version"),)
+
+
+class ProfileFormBinding(db.Model):
+    __tablename__ = "profile_form_bindings"
+    id = db.Column(db.Integer, primary_key=True)
+    definition_id = db.Column(
+        db.Integer, db.ForeignKey("profile_definitions.id"), nullable=False, index=True
+    )
+    form_id = db.Column(db.Integer, db.ForeignKey("dynamic_forms.id"), nullable=False, index=True)
+    section_key = db.Column(db.String(80), nullable=False, default="general")
+    section_title = db.Column(db.String(160), nullable=False, default="اطلاعات تکمیلی")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    form = db.relationship("DynamicForm")
+    __table_args__ = (db.UniqueConstraint("definition_id", "form_id"),)
+
+
+class ProfileRecord(db.Model):
+    __tablename__ = "profile_records"
+    id = db.Column(db.Integer, primary_key=True)
+    definition_id = db.Column(
+        db.Integer, db.ForeignKey("profile_definitions.id"), nullable=False, index=True
+    )
+    subject_id = db.Column(db.Integer, nullable=False, index=True)
+    values_json = db.Column(db.Text, nullable=False, default="{}")
+    record_version = db.Column(db.Integer, nullable=False, default=1)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (db.UniqueConstraint("definition_id", "subject_id"),)
+
+    @property
+    def values(self):
+        try:
+            value = json.loads(self.values_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 
 
 class Organization(db.Model):

@@ -5,6 +5,7 @@ from .models import (
     AssessmentInstrument,
     MicroLesson,
     PersonalizationRule,
+    ProfileDefinition,
     ScenarioLevel,
     ScenarioTopic,
     SafetyProtocol,
@@ -463,6 +464,20 @@ def seed_content():
                 home,
                 next_step,
                 skill,
+            )
+    for profile_type, title in (
+        ("organization", "پروفایل سازمان"),
+        ("guardian", "پروفایل والد / سرپرست"),
+        ("child", "پروفایل فرزند"),
+    ):
+        if not ProfileDefinition.query.filter_by(profile_type=profile_type).first():
+            db.session.add(
+                ProfileDefinition(
+                    profile_type=profile_type,
+                    title=title,
+                    version=1,
+                    status="active",
+                )
             )
     db.session.commit()
 
