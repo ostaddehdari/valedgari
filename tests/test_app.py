@@ -1,5 +1,6 @@
 import io
 import json
+import re
 from datetime import date, timedelta
 
 from app.extensions import db
@@ -1002,6 +1003,17 @@ def test_dashboard_css_contains_scrollable_modal_contract(client):
     css = client.get("/static/css/app.css").get_data(as_text=True)
     assert ".modal-dialog-scrollable .modal-content>form>.modal-body" in css
     assert "overflow-y:auto" in css
+
+
+def test_local_assets_use_content_fingerprints_on_public_and_dashboard_pages(client):
+    public_html = client.get("/").get_data(as_text=True)
+    assert re.search(r'/static/css/app\.css\?v=[0-9a-f]{12}', public_html)
+    assert re.search(r'/static/js/app\.js\?v=[0-9a-f]{12}', public_html)
+
+    login(client)
+    dashboard_html = client.get("/dashboard/").get_data(as_text=True)
+    assert re.search(r'/static/css/app\.css\?v=[0-9a-f]{12}', dashboard_html)
+    assert re.search(r'/static/js/app\.js\?v=[0-9a-f]{12}', dashboard_html)
 
 
 def create_stage_eight_organization(client, app, name="سازمان مستقل"):

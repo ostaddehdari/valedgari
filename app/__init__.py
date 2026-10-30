@@ -1,8 +1,10 @@
 import json
 import os
+from hashlib import sha256
+from pathlib import Path
 
 import click
-from flask import Flask, render_template
+from flask import Flask, render_template, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config, ProductionConfig
@@ -41,6 +43,22 @@ def create_app(config_object=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(parent_bp)
     app.register_blueprint(admin_bp)
+
+    static_asset_versions = {}
+
+    def static_asset(filename):
+        """Build a cache-safe URL for a local static asset."""
+        version = static_asset_versions.get(filename)
+        if version is None:
+            try:
+                asset_path = Path(app.static_folder, filename)
+                version = sha256(asset_path.read_bytes()).hexdigest()[:12]
+            except OSError:
+                version = app.config["APP_VERSION"]
+            static_asset_versions[filename] = version
+        return url_for("static", filename=filename, v=version)
+
+    app.jinja_env.globals["static_asset"] = static_asset
 
     @login_manager.user_loader
     def load_user(user_id):
