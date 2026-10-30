@@ -20,6 +20,10 @@ if [[ "${AUTO_CREATE_SCHEMA:-}" != "0" ]]; then
   echo "AUTO_CREATE_SCHEMA باید در ${ENV_FILE} برابر 0 باشد." >&2
   exit 2
 fi
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "release.sh باید با دسترسی root اجرا شود." >&2
+  exit 2
+fi
 
 if [[ -f "${DB_FILE}" ]]; then
   "${APP_DIR}/deploy/backup-db.sh"
@@ -38,6 +42,10 @@ if [[ "${VALEDGARI_SEED_PILOT:-0}" == "1" ]]; then
   "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app seed-stage15-pilot
 fi
 
+install -m 644 "${APP_DIR}/deploy/valedgari-jobs.service" "/etc/systemd/system/valedgari-jobs.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-jobs.timer" "/etc/systemd/system/valedgari-jobs.timer"
+systemctl daemon-reload
+systemctl enable --now valedgari-jobs.timer
 systemctl restart valedgari
 for attempt in {1..20}; do
   if curl -fsS http://127.0.0.1:8010/health/release >/dev/null; then
