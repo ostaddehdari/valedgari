@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 022
 
 APP_DIR="${VALEDGARI_APP_DIR:-/var/www/valedgari}"
 ENV_FILE="${VALEDGARI_ENV_FILE:-/etc/valedgari.env}"
@@ -24,6 +25,18 @@ if [[ "${EUID}" -ne 0 ]]; then
   echo "release.sh باید با دسترسی root اجرا شود." >&2
   exit 2
 fi
+
+# A prior root shell may have retained umask 077 after creating the backup key.
+# Normalize only application source and virtualenv readability; instance data stays private.
+chmod 755 "${APP_DIR}"
+for source_dir in app migrations; do
+  find "${APP_DIR}/${source_dir}" -type d -exec chmod 755 {} +
+  find "${APP_DIR}/${source_dir}" -type f -exec chmod a+r {} +
+done
+chmod a+r "${APP_DIR}/wsgi.py" "${APP_DIR}/config.py"
+find "${APP_DIR}/.venv" -type d -exec chmod 755 {} +
+find "${APP_DIR}/.venv" -type f -exec chmod a+r {} +
+find "${APP_DIR}/.venv/bin" -maxdepth 1 -type f -exec chmod 755 {} +
 
 if [[ -f "${DB_FILE}" ]]; then
   "${APP_DIR}/deploy/backup-db.sh"

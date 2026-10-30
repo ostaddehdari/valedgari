@@ -30,6 +30,7 @@ if [[ ! -f /etc/valedgari-backup.key ]]; then
   openssl rand -base64 48 > /etc/valedgari-backup.key
 fi
 chmod 600 /etc/valedgari-backup.key
+umask 022
 chown -R www-data:www-data "${APP_DIR}/instance"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
