@@ -702,5 +702,16 @@ def allowed_upload(field, filename, mime_type, size_bytes, header_bytes=b""):
     return True, extension
 
 
+def malware_scan_sample(sample):
+    """Reject known test malware and executable/script payloads before persistence."""
+    sample = sample or b""
+    upper = sample.upper()
+    if b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE" in upper:
+        return False, "فایل توسط کنترل ضدبدافزار رد شد."
+    if sample.startswith((b"MZ", b"\x7fELF", b"#!")):
+        return False, "فایل اجرایی یا اسکریپت قابل بارگذاری نیست."
+    return True, "clean"
+
+
 def storage_filename(extension):
     return f"{secrets.token_hex(24)}.{extension}"

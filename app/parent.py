@@ -60,6 +60,7 @@ from .form_engine import (
     NON_INPUT_TYPES,
     UPLOAD_TYPES,
     allowed_upload,
+    malware_scan_sample,
     score_answers,
     storage_filename,
     validate_answers,
@@ -857,7 +858,7 @@ def fill_form(assignment_id):
                     upload.stream.seek(0, os.SEEK_END)
                     size_bytes = upload.stream.tell()
                     upload.stream.seek(0)
-                    header_bytes = upload.stream.read(32)
+                    header_bytes = upload.stream.read(1024 * 1024)
                     upload.stream.seek(0)
                     allowed, result = allowed_upload(
                         field, upload.filename, upload.mimetype, size_bytes, header_bytes
@@ -865,6 +866,10 @@ def fill_form(assignment_id):
                     if not allowed:
                         upload_errors.append(f"{field.get('label')}: {result}")
                     else:
+                        clean, scan_result = malware_scan_sample(header_bytes)
+                        if not clean:
+                            upload_errors.append(f"{field.get('label')}: {scan_result}")
+                            continue
                         storage_name = storage_filename(result)
                         folder = os.path.join(current_app.instance_path, "form_uploads")
                         os.makedirs(folder, mode=0o700, exist_ok=True)

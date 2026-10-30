@@ -1,0 +1,15 @@
+[Unit]
+Description=Valedgari Stage 15 background jobs
+After=valedgari.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/valedgari
+EnvironmentFile=/etc/valedgari.env
+ExecStart=/var/www/valedgari/.venv/bin/flask --app wsgi:app process-jobs --limit 100
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/www/valedgari/instance

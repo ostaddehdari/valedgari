@@ -6,8 +6,9 @@ from flask import Flask, render_template
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config, ProductionConfig
-from .extensions import csrf, db, login_manager
+from .extensions import csrf, db, login_manager, migrate
 from .models import OperationalEvent, User
+from .security import SecretRedactionFilter
 from .seed import seed_content
 
 
@@ -28,6 +29,8 @@ def create_app(config_object=None):
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
+    migrate.init_app(app, db, directory="migrations")
+    app.logger.addFilter(SecretRedactionFilter())
 
     from .auth import bp as auth_bp
     from .main import bp as main_bp
@@ -156,9 +159,35 @@ def create_app(config_object=None):
         db.session.execute(text("SELECT 1"))
         click.echo(f"database=ok version={app.config['APP_VERSION']}")
 
+    @app.cli.command("seed-stage15-pilot")
+    def seed_stage15_pilot_command():
+        """Create/update the deterministic controlled-pilot dataset."""
+        from .pilot import seed_stage15_pilot
+
+        summary = seed_stage15_pilot()
+        click.echo(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+
+    @app.cli.command("migrate-stage15-data")
+    def migrate_stage15_data_command():
+        """Idempotently move legacy role/profile data to Stage 15 profiles."""
+        from .data_migration import migrate_stage15_data
+
+        actor = User.query.filter_by(role="admin").order_by(User.id).first()
+        result = migrate_stage15_data(actor.id if actor else None)
+        click.echo(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    @app.cli.command("process-jobs")
+    @click.option("--limit", default=50, type=click.IntRange(1, 500))
+    def process_background_jobs(limit):
+        """Process queued reports, imports, notifications and file scans."""
+        from .jobs import process_jobs
+
+        click.echo(json.dumps(process_jobs(limit), ensure_ascii=False, sort_keys=True))
+
     with app.app_context():
-        db.create_all()
-        seed_content()
+        if app.config.get("AUTO_CREATE_SCHEMA", True):
+            db.create_all()
+            seed_content()
 
     return app
 

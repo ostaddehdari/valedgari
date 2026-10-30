@@ -2740,3 +2740,148 @@ def test_stage14_growth_report_schedule_completes_with_form_response(client, app
         assert schedule.status == "completed"
         assert schedule.completed_response_id is not None
 
+
+def test_stage15_pilot_has_exact_contract_overlap_and_independent_children(app):
+    from app.pilot import seed_stage15_pilot
+
+    with app.app_context():
+        first = seed_stage15_pilot()
+        second = seed_stage15_pilot()
+        assert first == second
+        assert first["organizations"] == 2
+        assert first["contracts"] == 2
+        assert first["contract_children"] == {
+            "PILOT-1405-A": 20,
+            "PILOT-1405-B": 20,
+        }
+        assert first["shared_children"] == 10
+        assert first["covered_unique"] == 30
+        assert first["independent_children"] == 10
+        assert first["total_children"] == 40
+
+
+def test_stage15_role_forms_are_profile_schemas_with_fake_records(app):
+    from app.pilot import seed_stage15_pilot
+
+    with app.app_context():
+        seed_stage15_pilot()
+        definitions = {
+            item.profile_type: item for item in ProfileDefinition.query.all()
+        }
+        assert {"guardian", "child", "organization"}.issubset(definitions)
+        assert len(definitions["guardian"].bindings) >= 1
+        assert len(definitions["child"].bindings) >= 1
+        assert len(definitions["organization"].bindings) >= 1
+        assert ProfileRecord.query.filter_by(
+            definition_id=definitions["guardian"].id
+        ).count() == 40
+        assert ProfileRecord.query.filter_by(
+            definition_id=definitions["child"].id
+        ).count() == 40
+        assert ProfileRecord.query.filter_by(
+            definition_id=definitions["organization"].id
+        ).count() == 2
+
+
+def test_stage15_legacy_organization_profile_migration_is_idempotent(app):
+    from app.data_migration import migrate_stage15_data
+
+    with app.app_context():
+        admin = User.query.filter_by(role="admin").one()
+        form = DynamicForm(
+            title="پروفایل قدیمی سازمان",
+            slug="legacy-org-stage15",
+            form_type="profile",
+            status="published",
+            schema_json=json.dumps([
+                {"id": "legacy_goal", "type": "text", "label": "هدف"}
+            ], ensure_ascii=False),
+            created_by=admin.id,
+        )
+        organization = Organization(
+            name="سازمان قدیمی",
+            registration_no="LEGACY-15",
+            profile_form=form,
+            profile_data_json=json.dumps({"legacy_goal": "حفظ داده قبلی"}, ensure_ascii=False),
+        )
+        db.session.add_all([form, organization])
+        db.session.commit()
+        migrate_stage15_data(admin.id)
+        migrate_stage15_data(admin.id)
+        definition = ProfileDefinition.query.filter_by(profile_type="organization").one()
+        record = ProfileRecord.query.filter_by(
+            definition_id=definition.id, subject_id=organization.id
+        ).one()
+        assert list(record.values.values()) == ["حفظ داده قبلی"]
+        assert ProfileFormBinding.query.filter_by(
+            definition_id=definition.id, form_id=form.id
+        ).count() == 1
+
+
+def test_stage15_background_queue_is_idempotent_and_retries(app):
+    from app.jobs import enqueue_job, process_jobs
+    from app.models import BackgroundJob
+
+    with app.app_context():
+        job, duplicate = enqueue_job(
+            "notification_batch", {"user_ids": [1, 2, 3]}, "stage15-notify"
+        )
+        db.session.commit()
+        duplicate_job, duplicate = enqueue_job(
+            "notification_batch", {"user_ids": [9]}, "stage15-notify"
+        )
+        assert duplicate is True and duplicate_job.id == job.id
+        result = process_jobs()
+        assert result["completed"] == 1
+        assert db.session.get(BackgroundJob, job.id).result["recipient_count"] == 3
+
+        failed, _ = enqueue_job(
+            "contract_report", {"contract_id": 999999}, "stage15-retry", max_attempts=2
+        )
+        db.session.commit()
+        result = process_jobs()
+        assert result["retried"] == 1
+        assert failed.status == "retry"
+
+
+def test_stage15_security_redacts_secrets_and_rejects_malware_sample():
+    from app.form_engine import malware_scan_sample
+    from app.security import redact_sensitive_text
+
+    clean, reason = malware_scan_sample(
+        b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    )
+    assert clean is False
+    assert reason
+    redacted = redact_sensitive_text("password=secret api_token:abc123")
+    assert "secret" not in redacted and "abc123" not in redacted
+    assert redacted.count("[REDACTED]") == 2
+
+
+def test_stage15_release_health_reports_database_and_queue(client):
+    response = client.get("/health/release")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["database"] == "available"
+    assert payload["migration"] == "unversioned"
+    assert payload["failed_jobs"] == 0
+    assert payload["version"] == "stage-15"
+
+
+def test_stage15_admin_directory_is_paginated(client, app):
+    with app.app_context():
+        app.config["ADMIN_PAGE_SIZE"] = 3
+        for index in range(6):
+            user = User(
+                full_name=f"والد صفحه {index}",
+                mobile=f"09128888{index:03d}",
+                role="parent",
+            )
+            user.set_password("ParentPass123")
+            db.session.add(user)
+        db.session.commit()
+    login(client, mobile="09120000001", password="AdminPass123")
+    response = client.get("/admin/users")
+    assert response.status_code == 200
+    assert "والدین: صفحه 1 از" in response.get_data(as_text=True)
+

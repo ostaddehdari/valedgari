@@ -17,7 +17,7 @@ if [[ ! -f "${APP_DIR}/requirements.txt" ]]; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx sqlite3 curl
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx sqlite3 curl openssl
 
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/pip" install --upgrade pip
@@ -25,6 +25,11 @@ python3 -m venv "${APP_DIR}/.venv"
 
 install -d -o www-data -g www-data -m 750 "${APP_DIR}/instance"
 install -d -o root -g root -m 700 /var/backups/valedgari
+if [[ ! -f /etc/valedgari-backup.key ]]; then
+  umask 077
+  openssl rand -base64 48 > /etc/valedgari-backup.key
+fi
+chmod 600 /etc/valedgari-backup.key
 chown -R www-data:www-data "${APP_DIR}/instance"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -34,7 +39,10 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     echo "FLASK_ENV=production"
     echo "SECRET_KEY=${SECRET_VALUE}"
     echo "DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db"
-    echo "APP_VERSION=stage-12"
+    echo "APP_VERSION=stage-15"
+    echo "AUTO_CREATE_SCHEMA=0"
+    echo "ADMIN_PAGE_SIZE=50"
+    echo "EXPORT_ROW_LIMIT=5000"
     echo "REQUIRE_SCIENTIFIC_APPROVAL=1"
     echo "ANONYMOUS_REPORT_MIN_GROUP=5"
     echo "PAYMENT_PROVIDER=manual"
@@ -54,8 +62,12 @@ install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.service" "/etc/systemd/s
 install -m 644 "${APP_DIR}/deploy/valedgari-healthcheck.timer" "/etc/systemd/system/valedgari-healthcheck.timer"
 install -m 644 "${APP_DIR}/deploy/valedgari-sms.service" "/etc/systemd/system/valedgari-sms.service"
 install -m 644 "${APP_DIR}/deploy/valedgari-sms.timer" "/etc/systemd/system/valedgari-sms.timer"
+install -m 644 "${APP_DIR}/deploy/valedgari-jobs.service" "/etc/systemd/system/valedgari-jobs.service"
+install -m 644 "${APP_DIR}/deploy/valedgari-jobs.timer" "/etc/systemd/system/valedgari-jobs.timer"
 install -m 644 "${APP_DIR}/deploy/valedgari-logrotate" "/etc/logrotate.d/valedgari"
-chmod 750 "${APP_DIR}/deploy/backup-db.sh" "${APP_DIR}/deploy/restore-test.sh" "${APP_DIR}/deploy/healthcheck.sh"
+chmod 750 "${APP_DIR}/deploy/backup-db.sh" "${APP_DIR}/deploy/restore-db.sh" \
+  "${APP_DIR}/deploy/restore-test.sh" "${APP_DIR}/deploy/healthcheck.sh" \
+  "${APP_DIR}/deploy/release.sh" "${APP_DIR}/deploy/rollback.sh"
 
 if [[ -n "${VALEDGARI_NGINX_VHOST:-}" ]]; then
   SITE_FILE="${VALEDGARI_NGINX_VHOST}"
@@ -90,8 +102,20 @@ fi
 
 nginx -t
 systemctl daemon-reload
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +a
+HAS_USERS="$(sqlite3 "${APP_DIR}/instance/valedgari.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users';" 2>/dev/null || echo 0)"
+HAS_ALEMBIC="$(sqlite3 "${APP_DIR}/instance/valedgari.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='alembic_version';" 2>/dev/null || echo 0)"
+if [[ "${HAS_USERS}" == "1" && "${HAS_ALEMBIC}" == "0" ]]; then
+  runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app db stamp 08de7b3ceefe
+fi
+runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app db upgrade
+runuser -u www-data --preserve-environment -- "${APP_DIR}/.venv/bin/flask" --app wsgi:app migrate-stage15-data
 systemctl enable --now valedgari
-systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer valedgari-healthcheck.timer valedgari-sms.timer
+systemctl enable --now valedgari-backup.timer valedgari-restore-test.timer \
+  valedgari-healthcheck.timer valedgari-sms.timer valedgari-jobs.timer
 systemctl reload nginx
 
 for attempt in {1..15}; do

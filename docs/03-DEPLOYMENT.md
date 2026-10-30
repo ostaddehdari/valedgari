@@ -1,6 +1,6 @@
 # راهنمای نصب صفر تا صد والدیار
 
-این راهنما برای نصب همه استیج‌های ۱ تا ۶ روی `https://srun.ir/valedgari/` است. لازم نیست استیج‌ها جداگانه نصب شوند؛ شاخه `main` آخرین نسخه یکپارچه را نصب می‌کند.
+این راهنما برای نصب یکپارچه همه استیج‌های ۱ تا ۱۵ روی `https://srun.ir/valedgari/` است. شاخه `main` آخرین نسخه یکپارچه را نصب می‌کند.
 
 ## ۱) پیش‌نیازها
 
@@ -71,6 +71,7 @@ flask --app wsgi:app create-reviewer
 systemctl status valedgari --no-pager
 systemctl list-timers 'valedgari-*' --all
 curl -fsS http://127.0.0.1:8010/health/ready
+curl -fsS http://127.0.0.1:8010/health/release
 curl -I https://srun.ir/valedgari/
 journalctl -u valedgari -n 100 --no-pager
 ```
@@ -104,7 +105,10 @@ pytest -q
 FLASK_ENV=production
 SECRET_KEY=generated-secret
 DATABASE_URL=sqlite:////var/www/valedgari/instance/valedgari.db
-APP_VERSION=stage-14
+APP_VERSION=stage-15
+AUTO_CREATE_SCHEMA=0
+ADMIN_PAGE_SIZE=50
+EXPORT_ROW_LIMIT=5000
 REQUIRE_SCIENTIFIC_APPROVAL=1
 ANONYMOUS_REPORT_MIN_GROUP=5
 PAYMENT_PROVIDER=manual
@@ -125,14 +129,8 @@ systemctl restart valedgari
 
 ```bash
 cd /var/www/valedgari
-bash deploy/backup-db.sh
 git pull --ff-only
-source .venv/bin/activate
-pip install -r requirements.txt
-set -a; source /etc/valedgari.env; set +a
-flask --app wsgi:app doctor
-systemctl restart valedgari
-curl -fsS http://127.0.0.1:8010/health/ready
+VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
 
 ## ۸) بکاپ و مانور بازیابی
@@ -145,14 +143,18 @@ systemctl start valedgari-restore-test.service
 journalctl -u valedgari-backup.service -u valedgari-restore-test.service -n 100 --no-pager
 ```
 
-فایل‌ها در `/var/backups/valedgari/` با دسترسی root ذخیره می‌شوند. مانور بازیابی، آخرین backup را فقط در `/tmp` باز می‌کند، integrity و تعداد جدول‌ها را می‌سنجد و به دیتابیس production دست نمی‌زند.
+فایل‌ها در `/var/backups/valedgari/` با دسترسی root و پسوند `.db.gz.enc` ذخیره می‌شوند. کلید مستقل `/etc/valedgari-backup.key` است و نباید همراه backup کپی شود. مانور بازیابی، آخرین backup را فقط در `/tmp` رمزگشایی می‌کند، integrity و تعداد جدول‌ها را می‌سنجد و به دیتابیس production دست نمی‌زند.
 
 ## ۹) بازگشت نسخه
 
-1. پیش از هر کار `bash deploy/backup-db.sh` را اجرا کنید.
-2. SHA نسخه سالم را از GitHub انتخاب کنید.
-3. نسخه را در مسیر جدا checkout و تست کنید؛ سپس سرویس را برگردانید.
-4. بازگشت دیتابیس فقط با backup تأییدشده و پس از توقف سرویس انجام شود.
+1. SHA نسخه سالم و فایل backup رمزگذاری‌شده قبل از انتشار را انتخاب کنید.
+2. با تأیید صریح اجرا کنید:
+
+```bash
+VALEDGARI_ROLLBACK_CONFIRM=ROLLBACK bash deploy/rollback.sh <GOOD_SHA> /var/backups/valedgari/<BACKUP>.db.gz.enc
+```
+
+3. readiness، گزارش مالی و تعداد ذی‌نفعان را پس از بازگشت کنترل کنید.
 
 کد و دیتابیس دو rollback مستقل‌اند. backup قدیمی را بدون بررسی schema روی دیتابیس جاری جایگزین نکنید.
 

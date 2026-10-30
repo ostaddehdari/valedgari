@@ -1158,6 +1158,11 @@ class FormResponse(db.Model):
     assignment = db.relationship("FormAssignment")
     user = db.relationship("User")
 
+    __table_args__ = (
+        db.Index("ix_form_response_family_timeline", "user_id", "child_id", "created_at"),
+        db.Index("ix_form_response_form_status", "form_id", "status"),
+    )
+
     @property
     def answers(self):
         try:
@@ -1221,6 +1226,44 @@ class JourneyNotification(db.Model):
     read_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     child = db.relationship("Child")
+
+
+class BackgroundJob(db.Model):
+    """Retryable work item for imports, reports, private-file scans and notifications."""
+
+    __tablename__ = "background_jobs"
+    id = db.Column(db.Integer, primary_key=True)
+    job_type = db.Column(db.String(50), nullable=False, index=True)
+    idempotency_key = db.Column(db.String(180), nullable=False, unique=True, index=True)
+    payload_json = db.Column(db.Text, nullable=False, default="{}")
+    result_json = db.Column(db.Text, nullable=False, default="{}")
+    status = db.Column(db.String(20), nullable=False, default="queued", index=True)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=5)
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    locked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    last_error = db.Column(db.String(700), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    @property
+    def payload(self):
+        try:
+            value = json.loads(self.payload_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @property
+    def result(self):
+        try:
+            value = json.loads(self.result_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
 
 
 class ProfileDefinition(db.Model):

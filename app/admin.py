@@ -94,6 +94,7 @@ from .profiles import (
     profile_record,
     profile_sections,
     save_profile_values,
+    sync_role_form_to_profile,
 )
 from .form_engine import (
     AI_CONTRACT,
@@ -101,6 +102,7 @@ from .form_engine import (
     FORM_TYPES,
     UPLOAD_TYPES,
     allowed_upload,
+    malware_scan_sample,
     field_catalog_payload,
     form_to_ai_contract,
     normalize_schema,
@@ -140,6 +142,7 @@ from .scenario_engine import (
     narrative_to_contract,
     validate_contract as validate_scenario_contract,
 )
+from .pilot import pilot_summary, seed_stage15_pilot
 from .growth_engine import (
     build_growth_timeline,
     contract_aggregate_report,
@@ -384,6 +387,32 @@ def dashboard():
     }
     recent_users = User.query.order_by(User.created_at.desc()).limit(6).all()
     return render_template("admin/dashboard.html", stats=stats, recent_users=recent_users)
+
+
+@bp.route("/pilot", methods=["GET", "POST"])
+@login_required
+@admin_required
+def pilot_center():
+    if request.method == "POST":
+        summary = seed_stage15_pilot(current_user.id)
+        flash(
+            f"داده پایلوت همگام شد: {summary['total_children']} فرزند، "
+            f"{summary['shared_children']} مشترک و {summary['independent_children']} غیرسازمانی.",
+            "success",
+        )
+        return redirect(url_for("admin.pilot_center"))
+    summary = pilot_summary()
+    contracts = OrganizationContract.query.filter(
+        OrganizationContract.contract_no.in_(["PILOT-1405-A", "PILOT-1405-B"])
+    ).order_by(OrganizationContract.contract_no).all()
+    profile_forms = DynamicForm.query.filter(
+        DynamicForm.slug.in_([
+            "stage15-parent-profile", "stage15-child-profile", "stage15-organization-profile"
+        ])
+    ).order_by(DynamicForm.slug).all()
+    return render_template(
+        "admin/pilot.html", summary=summary, contracts=contracts, profile_forms=profile_forms
+    )
 
 
 @bp.get("/operations")
@@ -2393,12 +2422,21 @@ def users():
         )
         user_query = user_query.filter(User.id.in_(user_ids or {-1}))
         child_query = child_query.filter(Child.id.in_(child_ids or {-1}))
-    user_rows = user_query.order_by(User.created_at.desc()).limit(250).all()
-    child_rows = child_query.order_by(Child.created_at.desc()).limit(250).all()
+    page_size = current_app.config["ADMIN_PAGE_SIZE"]
+    user_pagination = user_query.order_by(User.created_at.desc()).paginate(
+        page=max(1, request.args.get("parent_page", 1, type=int)), per_page=page_size,
+        error_out=False,
+    )
+    child_pagination = child_query.order_by(Child.created_at.desc()).paginate(
+        page=max(1, request.args.get("child_page", 1, type=int)), per_page=page_size,
+        error_out=False,
+    )
     return render_template(
         "admin/users.html",
-        users=user_rows,
-        children=child_rows,
+        users=user_pagination.items,
+        children=child_pagination.items,
+        user_pagination=user_pagination,
+        child_pagination=child_pagination,
         organizations=Organization.query.order_by(Organization.name).all(),
         search=search,
         selected_organization_id=organization_id,
@@ -3294,7 +3332,9 @@ def form_assignment(form_id):
     target_id = request.form.get("target_id", type=int) if target_type in {"user", "child"} else None
     target_ref = request.form.get("target_ref", "").strip()[:120]
     if target_type == "role":
-        target_ref = target_ref if target_ref in {"parent", "admin", "reviewer"} else "parent"
+        target_ref = target_ref if target_ref in {
+            "parent", "child", "organization", "admin", "reviewer"
+        } else "parent"
     if target_type == "user" and not db.session.get(User, target_id):
         flash("کاربر هدف پیدا نشد.", "danger")
     elif target_type == "child" and not db.session.get(Child, target_id):
@@ -3320,6 +3360,13 @@ def form_assignment(form_id):
             created_by=current_user.id,
         )
         db.session.add(assignment)
+        if target_type == "role":
+            sync_role_form_to_profile(
+                form,
+                target_ref,
+                current_user.id,
+                request.form.get("title", "").strip() or form.title,
+            )
         db.session.commit()
         flash("فرم به مخاطب انتخاب‌شده تخصیص یافت.", "success")
     return redirect(url_for("admin.form_responses", form_id=form.id))
@@ -3342,7 +3389,7 @@ def form_media_upload(form_id):
         upload.stream.seek(0, os.SEEK_END)
         size_bytes = upload.stream.tell()
         upload.stream.seek(0)
-        header_bytes = upload.stream.read(32)
+        header_bytes = upload.stream.read(1024 * 1024)
         upload.stream.seek(0)
         allowed, result = allowed_upload(
             field, upload.filename, upload.mimetype, size_bytes, header_bytes
@@ -3350,6 +3397,10 @@ def form_media_upload(form_id):
         if not allowed:
             flash(result, "danger")
         else:
+            clean, scan_result = malware_scan_sample(header_bytes)
+            if not clean:
+                flash(scan_result, "danger")
+                return redirect(url_for("admin.form_editor", form_id=form.id))
             storage_name = storage_filename(result)
             folder = os.path.join(current_app.instance_path, "form_uploads")
             os.makedirs(folder, mode=0o700, exist_ok=True)
@@ -3409,13 +3460,17 @@ def form_media(asset_id):
 @admin_required
 def form_responses(form_id):
     form = db.get_or_404(DynamicForm, form_id)
-    responses = FormResponse.query.filter_by(form_id=form.id).order_by(
+    response_pagination = FormResponse.query.filter_by(form_id=form.id).order_by(
         FormResponse.updated_at.desc()
-    ).all()
+    ).paginate(
+        page=max(1, request.args.get("page", 1, type=int)),
+        per_page=current_app.config["ADMIN_PAGE_SIZE"], error_out=False,
+    )
     return render_template(
         "admin/form_responses.html",
         form=form,
-        responses=responses,
+        responses=response_pagination.items,
+        response_pagination=response_pagination,
         assignments=FormAssignment.query.filter_by(form_id=form.id).order_by(FormAssignment.created_at.desc()).all(),
         parents=User.query.filter_by(role="parent").order_by(User.full_name).all(),
         children=Child.query.order_by(Child.name).all(),
@@ -3459,7 +3514,8 @@ def form_responses_export(form_id):
     stream = io.StringIO()
     writer = csv.writer(stream)
     writer.writerow(["response_id", "status", "user", "mobile", "child", "version", "score", *[field.get("label") for field in fields]])
-    for response in FormResponse.query.filter_by(form_id=form.id).order_by(FormResponse.id).all():
+    export_limit = current_app.config["EXPORT_ROW_LIMIT"]
+    for response in FormResponse.query.filter_by(form_id=form.id).order_by(FormResponse.id).limit(export_limit).all():
         writer.writerow([
             response.id,
             response.status,
@@ -3478,6 +3534,9 @@ def form_responses_export(form_id):
     return Response(
         "\ufeff" + stream.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{form.slug}-responses.csv"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{form.slug}-responses.csv"',
+            "X-Export-Row-Limit": str(export_limit),
+        },
     )
 

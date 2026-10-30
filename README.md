@@ -61,6 +61,11 @@
 - مرکز حریم خصوصی، رضایت نسخه‌دار و حذف ممیزی‌شده پرونده فرزند
 - نقش مستقل ناظر علمی و تأیید متصل به snapshot نسخه محتوا
 - readiness دیتابیس، بکاپ روزانه و مانور بازیابی هفتگی
+- Migration نسخه‌دار Flask-Migrate، صف کار Retryپذیر و health gate انتشار
+- بکاپ رمزگذاری‌شده AES-256، restore drill و دستورهای release/rollback
+- RBAC مرکزی، حذف Secret از Log، اسکن فایل و صفحه‌بندی داده‌های مدیریتی
+- پایلوت تکرارپذیر استیج ۱۵ با ۲ سازمان، ۲ قرارداد و ۴۰ دانش‌آموز
+- پروفایل نقش‌محور والد، فرزند و سازمان بر پایه فیلدهای فرم‌ساز
 
 ## اجرای محلی
 
@@ -69,7 +74,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 export SECRET_KEY="یک-کلید-تصادفی-طولانی"
+flask --app wsgi:app db upgrade
 flask --app wsgi:app create-admin
+flask --app wsgi:app seed-stage15-pilot
 flask --app wsgi:app run --debug
 ```
 
@@ -109,6 +116,7 @@ pytest -q
 - [راهنمای تحویل استیج ۱۲؛ سفارش، پرداخت و پیامک](docs/19-STAGE-12-COMMERCE-PAYMENT-SMS.md)
 - [راهنمای تحویل استیج ۱۳؛ موتور موقعیت‌های ۲۵×۵](docs/20-STAGE-13-SCENARIO-ENGINE.md)
 - [راهنمای تحویل استیج ۱۴؛ یکپارچه‌سازی مسیر رشد](docs/21-STAGE-14-GROWTH-INTEGRATION.md)
+- [راهنمای تحویل استیج ۱۵؛ مهاجرت، پایلوت و انتشار](docs/22-STAGE-15-RELEASE-PILOT.md)
 
 > محتوای آموزشی نمونه است و پیش از انتشار عمومی باید توسط متخصص محتوای والدگری بازبینی و نسخه‌بندی شود. این سامانه جایگزین خدمات بحران یا تشخیص بالینی نیست.
 

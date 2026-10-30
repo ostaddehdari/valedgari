@@ -2,13 +2,20 @@ import json
 
 from .extensions import db
 from .form_engine import MULTI_VALUE_TYPES, NON_INPUT_TYPES
-from .models import ProfileDefinition, ProfileRecord
+from .models import ProfileDefinition, ProfileFormBinding, ProfileRecord
 
 
 PROFILE_TYPES = {
     "organization": "پروفایل سازمان",
     "guardian": "پروفایل والد / سرپرست",
     "child": "پروفایل فرزند",
+}
+
+ROLE_PROFILE_TYPES = {
+    "parent": "guardian",
+    "guardian": "guardian",
+    "child": "child",
+    "organization": "organization",
 }
 
 
@@ -26,6 +33,40 @@ def profile_record(definition, subject_id):
     return ProfileRecord.query.filter_by(
         definition_id=definition.id, subject_id=subject_id
     ).first()
+
+
+def sync_role_form_to_profile(form, role_key, actor_id=None, section_title=None):
+    """Treat a published role-linked form as the active profile schema for that role."""
+    profile_type = ROLE_PROFILE_TYPES.get(role_key)
+    if not profile_type or not form or form.status != "published":
+        return None
+    definition = active_profile_definition(profile_type)
+    if not definition:
+        definition = ProfileDefinition(
+            profile_type=profile_type,
+            title=PROFILE_TYPES[profile_type],
+            version=1,
+            status="active",
+            created_by=actor_id,
+        )
+        db.session.add(definition)
+        db.session.flush()
+    binding = ProfileFormBinding.query.filter_by(
+        definition_id=definition.id, form_id=form.id
+    ).first()
+    if not binding:
+        binding = ProfileFormBinding(
+            definition_id=definition.id,
+            form_id=form.id,
+            section_key=f"role-{role_key}",
+            section_title=(section_title or form.title)[:160],
+            sort_order=len(definition.bindings),
+            is_active=True,
+        )
+        db.session.add(binding)
+    else:
+        binding.is_active = True
+    return binding
 
 
 def profile_sections(definition, record=None):

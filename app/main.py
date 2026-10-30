@@ -3,7 +3,14 @@ from flask_login import current_user
 from sqlalchemy import text
 
 from .extensions import db
-from .models import Course, CourseEnrollment, CourseSkillMembership, ScenarioTopic, SkillModule
+from .models import (
+    BackgroundJob,
+    Course,
+    CourseEnrollment,
+    CourseSkillMembership,
+    ScenarioTopic,
+    SkillModule,
+)
 from .course_engine import COURSE_LEVELS
 
 
@@ -94,4 +101,30 @@ def health_ready():
         database="available",
         version=current_app.config["APP_VERSION"],
     )
+
+
+@bp.get("/health/release")
+def health_release():
+    """Deployment gate: database, migration marker and terminal queue failures."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        migration = db.session.execute(
+            text("SELECT version_num FROM alembic_version LIMIT 1")
+        ).scalar_one_or_none()
+    except Exception as exc:
+        db.session.rollback()
+        if "alembic_version" not in str(exc):
+            current_app.logger.exception("release database check failed")
+            return jsonify(status="error", check="database"), 503
+        migration = "unversioned"
+    failed_jobs = BackgroundJob.query.filter_by(status="failed").count()
+    response = jsonify(
+        status="ok" if failed_jobs == 0 else "warning",
+        check="release",
+        database="available",
+        migration=migration or "unknown",
+        failed_jobs=failed_jobs,
+        version=current_app.config["APP_VERSION"],
+    )
+    return (response, 200) if failed_jobs == 0 else (response, 503)
 

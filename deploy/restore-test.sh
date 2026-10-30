@@ -4,7 +4,8 @@ set -Eeuo pipefail
 APP_DIR="${VALEDGARI_APP_DIR:-/var/www/valedgari}"
 BACKUP_DIR="${VALEDGARI_BACKUP_DIR:-/var/backups/valedgari}"
 ENV_FILE="${VALEDGARI_ENV_FILE:-/etc/valedgari.env}"
-LATEST="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'valedgari-*.db.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2-)"
+KEY_FILE="${VALEDGARI_BACKUP_KEY_FILE:-/etc/valedgari-backup.key}"
+LATEST="$(find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'valedgari-*.db.gz.enc' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2-)"
 
 if [[ -z "${LATEST}" || ! -f "${LATEST}" ]]; then
   echo "هیچ بکاپی برای مانور بازیابی وجود ندارد." >&2
@@ -13,7 +14,9 @@ fi
 
 DRILL_DIR="$(mktemp -d /tmp/valedgari-restore-drill.XXXXXX)"
 trap 'rm -rf -- "${DRILL_DIR}"' EXIT
-gzip -cd -- "${LATEST}" > "${DRILL_DIR}/restored.db"
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -pass "file:${KEY_FILE}" -in "${LATEST}" -out "${DRILL_DIR}/restored.db.gz"
+gzip -cd -- "${DRILL_DIR}/restored.db.gz" > "${DRILL_DIR}/restored.db"
 RESULT="$(sqlite3 "${DRILL_DIR}/restored.db" 'PRAGMA integrity_check;')"
 if [[ "${RESULT}" != "ok" ]]; then
   echo "Integrity check failed: ${RESULT}" >&2
