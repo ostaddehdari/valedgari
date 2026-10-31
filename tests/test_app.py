@@ -1916,9 +1916,8 @@ def test_admin_manages_skill_style_situation_and_prerequisite_relations(client, 
         prerequisite_id = SkillModule.query.first().id
     login(client, mobile="09120000001", password="AdminPass123")
     response = client.post(
-        "/admin/skills",
+        "/admin/skills/new",
         data={
-            "action": "save",
             "title": "گفت‌وگوی ترمیمی",
             "slug": "repair-conversation",
             "code": "S21",
@@ -1939,6 +1938,30 @@ def test_admin_manages_skill_style_situation_and_prerequisite_relations(client, 
         assert skill.style_tags == ["authoritative", "authoritarian"]
         assert skill.scenario_ids == [topic_id]
         assert skill.prerequisite_ids == [prerequisite_id]
+        assert ScenarioTopicSkillMembership.query.filter_by(
+            topic_id=topic_id, skill_id=skill.id
+        ).count() == 1
+
+
+def test_admin_skill_catalog_and_editors_are_separate_full_pages(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    catalog = client.get("/admin/skills")
+    assert catalog.status_code == 200
+    catalog_text = catalog.get_data(as_text=True)
+    assert "مهارت جدید" in catalog_text
+    assert "skill-catalog-table" in catalog_text
+    assert "skillEditor" not in catalog_text
+
+    new_page = client.get("/admin/skills/new")
+    assert new_page.status_code == 200
+    assert "ساخت مهارت جدید" in new_page.get_data(as_text=True)
+    with app.app_context():
+        skill_id = SkillModule.query.first().id
+    edit_page = client.get(f"/admin/skills/{skill_id}/edit")
+    assert edit_page.status_code == 200
+    edit_text = edit_page.get_data(as_text=True)
+    assert "ویرایش مهارت" in edit_text
+    assert "بازگشت به فهرست مهارت‌ها" in edit_text
 
 
 def test_course_structure_contract_rejects_invalid_and_caps_depth():
@@ -2846,6 +2869,45 @@ def test_stage15_role_forms_are_profile_schemas_with_fake_records(app):
         assert ProfileRecord.query.filter_by(
             definition_id=definitions["organization"].id
         ).count() == 2
+
+
+def test_stage15_professional_scenario_library_covers_every_topic_and_level(app):
+    from app.scenario_library import LIBRARY_PREFIX, seed_professional_scenario_library
+
+    with app.app_context():
+        first = seed_professional_scenario_library()
+        second = seed_professional_scenario_library()
+        assert first["topics"] == 25
+        assert first["levels"] == 5
+        assert first["variants_per_level"] == 2
+        assert first["narratives_created"] == 250
+        assert first["reactions_created"] == 1000
+        assert first["missing_cells"] == 0
+        assert second["narratives_created"] == 0
+        assert second["reactions_created"] == 0
+        assert second["narratives_total"] == 250
+        assert second["reactions_total"] == 1000
+
+        narratives = ScenarioNarrative.query.filter(
+            ScenarioNarrative.source_note.like(f"{LIBRARY_PREFIX}:%")
+        ).all()
+        assert len(narratives) == 250
+        assert all(item.status == "draft" for item in narratives)
+        assert all(len(item.reactions) == 4 for item in narratives)
+        assert all(narrative_publish_errors(item) == [] for item in narratives)
+        coverage = {(item.topic_id, item.level): 0 for item in narratives}
+        for item in narratives:
+            coverage[(item.topic_id, item.level)] += 1
+            if item.level == 1:
+                assert item.growth_next_narrative_id is None
+            else:
+                assert item.growth_next_narrative.level == item.level - 1
+            if item.level == 5:
+                assert item.fall_next_narrative_id is None
+            else:
+                assert item.fall_next_narrative.level == item.level + 1
+        assert len(coverage) == 125
+        assert set(coverage.values()) == {2}
 
 
 def test_stage15_legacy_organization_profile_migration_is_idempotent(app):

@@ -951,73 +951,163 @@ def learning_path():
     )
 
 
+def sync_skill_topics(skill, topic_ids):
+    """Keep the skill editor and the situation editor on the same relation table."""
+    valid_ids = {
+        item.id for item in ScenarioTopic.query.filter(ScenarioTopic.id.in_(topic_ids)).all()
+    } if topic_ids else set()
+    existing = {
+        item.topic_id: item
+        for item in ScenarioTopicSkillMembership.query.filter_by(skill_id=skill.id).all()
+    }
+    affected_topic_ids = set(existing) | valid_ids
+    for topic_id, link in existing.items():
+        if topic_id not in valid_ids:
+            db.session.delete(link)
+    for topic_id in topic_ids:
+        if topic_id not in valid_ids or topic_id in existing:
+            continue
+        last_order = db.session.query(db.func.max(ScenarioTopicSkillMembership.sort_order)).filter_by(
+            topic_id=topic_id
+        ).scalar()
+        db.session.add(
+            ScenarioTopicSkillMembership(
+                topic_id=topic_id,
+                skill_id=skill.id,
+                sort_order=(last_order if last_order is not None else -1) + 1,
+            )
+        )
+    db.session.flush()
+    for topic_id in affected_topic_ids:
+        profile = ScenarioTopicProfile.query.filter_by(topic_id=topic_id).first()
+        if not profile:
+            continue
+        first_link = ScenarioTopicSkillMembership.query.filter_by(topic_id=topic_id).order_by(
+            ScenarioTopicSkillMembership.sort_order,
+            ScenarioTopicSkillMembership.id,
+        ).first()
+        profile.target_skill_id = first_link.skill_id if first_link else None
+
+
+def save_skill_from_form(skill=None):
+    title = request.form.get("title", "").strip()[:120]
+    raw_slug = request.form.get("slug", "").strip()
+    slug = make_slug(raw_slug)[:80]
+    code = request.form.get("code", "").strip().upper()[:30]
+    level = request.form.get("level", "foundation")
+    if level not in COURSE_LEVELS:
+        level = "foundation"
+    duplicate = SkillModule.query.filter(
+        SkillModule.slug == slug,
+        SkillModule.id != (skill.id if skill else -1),
+    ).first()
+    errors = []
+    if len(title) < 3:
+        errors.append("عنوان مهارت باید حداقل سه نویسه باشد.")
+    if not raw_slug:
+        errors.append("نامک انگلیسی مهارت الزامی است.")
+    if duplicate:
+        errors.append("نامک مهارت تکراری است.")
+    if errors:
+        return skill, errors
+    if not skill:
+        skill = SkillModule(slug=slug, title=title, description="")
+        db.session.add(skill)
+        db.session.flush()
+    skill.title = title
+    skill.slug = slug
+    skill.code = code
+    skill.description = request.form.get("description", "").strip()[:500]
+    skill.icon = request.form.get("icon", "fa-seedling").strip()[:60] or "fa-seedling"
+    skill.duration = max(1, min(240, request.form.get("duration", 10, type=int)))
+    skill.level = level
+    skill.sort_order = max(0, request.form.get("sort_order", 0, type=int))
+    skill.is_published = request.form.get("is_published") == "1"
+    skill.style_tags_json = json.dumps(
+        list(dict.fromkeys(
+            item for item in request.form.getlist("style_tags") if item in STYLE_TAGS
+        )),
+        ensure_ascii=False,
+    )
+    topic_ids = list(dict.fromkeys(request.form.getlist("scenario_ids", type=int)))
+    topic_ids = [item for item in topic_ids if db.session.get(ScenarioTopic, item)]
+    skill.scenario_ids_json = json.dumps(topic_ids, ensure_ascii=False)
+    prerequisite_ids = list(dict.fromkeys(request.form.getlist("prerequisite_ids", type=int)))
+    skill.prerequisite_ids_json = json.dumps(
+        [
+            item for item in prerequisite_ids
+            if db.session.get(SkillModule, item) and item != skill.id
+        ],
+        ensure_ascii=False,
+    )
+    sync_skill_topics(skill, topic_ids)
+    return skill, []
+
+
 @bp.route("/skills", methods=["GET", "POST"])
 @login_required
 @admin_required
 def skill_catalog():
     if request.method == "POST":
-        action = request.form.get("action", "save")
-        skill_id = request.form.get("skill_id", type=int)
-        skill = db.session.get(SkillModule, skill_id) if skill_id else None
-        if action == "toggle" and skill:
-            skill.is_published = not skill.is_published
-            db.session.commit()
-            flash("وضعیت انتشار مهارت تغییر کرد.", "info")
-            return redirect(url_for("admin.skill_catalog"))
-        if action != "save":
+        skill = db.get_or_404(SkillModule, request.form.get("skill_id", type=int))
+        if request.form.get("action") != "toggle":
             abort(400)
-        title = request.form.get("title", "").strip()[:120]
-        slug = make_slug(request.form.get("slug", ""))[:80]
-        code = request.form.get("code", "").strip().upper()[:30]
-        level = request.form.get("level", "foundation")
-        if level not in COURSE_LEVELS:
-            level = "foundation"
-        duplicate = SkillModule.query.filter(
-            SkillModule.slug == slug,
-            SkillModule.id != (skill.id if skill else -1),
-        ).first()
-        errors = []
-        if len(title) < 3:
-            errors.append("عنوان مهارت باید حداقل سه نویسه باشد.")
-        if duplicate:
-            errors.append("نامک مهارت تکراری است.")
+        skill.is_published = not skill.is_published
+        db.session.commit()
+        flash("وضعیت انتشار مهارت تغییر کرد.", "info")
+        return redirect(url_for("admin.skill_catalog"))
+    skills = SkillModule.query.order_by(SkillModule.sort_order, SkillModule.id).all()
+    topic_map = {item.id: item for item in ScenarioTopic.query.all()}
+    skill_topics = {
+        skill.id: [
+            topic_map[link.topic_id]
+            for link in ScenarioTopicSkillMembership.query.filter_by(skill_id=skill.id).order_by(
+                ScenarioTopicSkillMembership.sort_order,
+                ScenarioTopicSkillMembership.id,
+            ).all()
+            if link.topic_id in topic_map
+        ]
+        for skill in skills
+    }
+    return render_template(
+        "admin/skills.html",
+        skills=skills,
+        skill_topics=skill_topics,
+        levels=COURSE_LEVELS,
+        style_tags=STYLE_TAGS,
+    )
+
+
+@bp.route("/skills/new", methods=["GET", "POST"])
+@bp.route("/skills/<int:skill_id>/edit", methods=["GET", "POST"])
+@login_required
+@admin_required
+def skill_editor(skill_id=None):
+    skill = db.get_or_404(SkillModule, skill_id) if skill_id else None
+    if request.method == "POST":
+        skill, errors = save_skill_from_form(skill)
         if errors:
             for error in errors:
                 flash(error, "danger")
         else:
-            if not skill:
-                skill = SkillModule(slug=slug, title=title, description="")
-                db.session.add(skill)
-            skill.title = title
-            skill.slug = slug
-            skill.code = code
-            skill.description = request.form.get("description", "").strip()[:500]
-            skill.icon = request.form.get("icon", "fa-seedling").strip()[:60] or "fa-seedling"
-            skill.duration = max(1, min(240, request.form.get("duration", 10, type=int)))
-            skill.level = level
-            skill.sort_order = max(0, request.form.get("sort_order", 0, type=int))
-            skill.is_published = request.form.get("is_published") == "1"
-            skill.style_tags_json = json.dumps(
-                [item for item in request.form.getlist("style_tags") if item in STYLE_TAGS],
-                ensure_ascii=False,
-            )
-            skill.scenario_ids_json = json.dumps(
-                [item for item in request.form.getlist("scenario_ids", type=int) if db.session.get(ScenarioTopic, item)],
-                ensure_ascii=False,
-            )
-            skill.prerequisite_ids_json = json.dumps(
-                [item for item in request.form.getlist("prerequisite_ids", type=int) if db.session.get(SkillModule, item) and item != skill.id],
-                ensure_ascii=False,
-            )
             db.session.commit()
             flash("مهارت و ارتباط‌های آموزشی آن ذخیره شد.", "success")
-            return redirect(url_for("admin.skill_catalog"))
-    edit_id = request.args.get("edit", type=int)
+            return redirect(url_for("admin.skill_editor", skill_id=skill.id))
+    selected_topic_ids = set(skill.scenario_ids if skill else [])
+    if skill:
+        selected_topic_ids.update(
+            item.topic_id
+            for item in ScenarioTopicSkillMembership.query.filter_by(skill_id=skill.id).all()
+        )
     return render_template(
-        "admin/skills.html",
+        "admin/skill_editor.html",
+        skill=skill,
         skills=SkillModule.query.order_by(SkillModule.sort_order, SkillModule.id).all(),
-        topics=ScenarioTopic.query.order_by(ScenarioTopic.title).all(),
-        selected=db.session.get(SkillModule, edit_id) if edit_id else None,
+        topics=ScenarioTopic.query.outerjoin(ScenarioTopicProfile).order_by(
+            ScenarioTopicProfile.sort_order,
+            ScenarioTopic.id,
+        ).all(),
+        selected_topic_ids=selected_topic_ids,
         levels=COURSE_LEVELS,
         style_tags=STYLE_TAGS,
     )

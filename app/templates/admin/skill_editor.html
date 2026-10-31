@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ 'ویرایش مهارت' if skill else 'مهارت جدید' }} | والدیار{% endblock %}
+{% block body_class %}admin-page full-editor-page{% endblock %}
+{% block content %}
+<section class="full-editor-header"><div class="container"><a class="editor-back" href="{{ url_for('admin.skill_catalog') }}"><i class="fa-solid fa-arrow-right"></i>بازگشت به فهرست مهارت‌ها</a><div><span class="eyebrow light">Skill Editor</span><h1>{{ 'ویرایش مهارت' if skill else 'ساخت مهارت جدید' }}</h1><p>مشخصات، سبک‌های والدگری، موقعیت‌های مرتبط و پیش‌نیازها را در یک صفحه ثبت کنید.</p></div></div></section>
+<div class="container full-editor-content">
+  <form method="post" class="panel-card full-editor-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="editor-section-heading"><span>۱</span><div><h2>مشخصات مهارت</h2><p>عنوان و کد کوتاه در فهرست مدیریت و مسیر آموزشی نمایش داده می‌شود.</p></div></div>
+    <div class="row g-3">
+      <div class="col-lg-6"><label class="form-label">عنوان مهارت</label><input class="form-control" name="title" required maxlength="120" value="{{ skill.title if skill else '' }}"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label">کد</label><input class="form-control" name="code" dir="ltr" maxlength="30" value="{{ skill.code if skill else '' }}" placeholder="S-01"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label">سطح آموزشی</label><select class="form-select" name="level">{% for key,label in levels.items() %}<option value="{{ key }}" {% if (skill and skill.level==key) or (not skill and key=='foundation') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="col-lg-6"><label class="form-label">نامک انگلیسی</label><input class="form-control" name="slug" dir="ltr" required maxlength="80" value="{{ skill.slug if skill else '' }}" placeholder="active-listening"></div>
+      <div class="col-sm-4 col-lg-2"><label class="form-label">آیکن Font Awesome</label><input class="form-control" name="icon" dir="ltr" maxlength="60" value="{{ skill.icon if skill else 'fa-seedling' }}"></div>
+      <div class="col-sm-4 col-lg-2"><label class="form-label">مدت (دقیقه)</label><input class="form-control" name="duration" type="number" min="1" max="240" value="{{ skill.duration if skill else 10 }}"></div>
+      <div class="col-sm-4 col-lg-2"><label class="form-label">ترتیب</label><input class="form-control" name="sort_order" type="number" min="0" value="{{ skill.sort_order if skill else 0 }}"></div>
+      <div class="col-12"><label class="form-label">توضیح مهارت</label><textarea class="form-control" name="description" rows="3" maxlength="500">{{ skill.description if skill else '' }}</textarea></div>
+    </div>
+    <div class="editor-section-heading mt-5"><span>۲</span><div><h2>سبک‌های مرتبط</h2><p>سبک‌هایی را مشخص کنید که این مهارت در تحلیل واکنش‌های آن‌ها کاربرد دارد.</p></div></div>
+    <div class="tag-check-grid editor-tag-grid">{% for key,label in style_tags.items() %}<label><input type="checkbox" name="style_tags" value="{{ key }}" {% if skill and key in skill.style_tags %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div>
+    <div class="editor-section-heading mt-5"><span>۳</span><div><h2>موقعیت‌های مرتبط</h2><p>یک مهارت می‌تواند در چند موقعیت تمرین شود و هر موقعیت نیز چند مهارت داشته باشد.</p></div></div>
+    <div class="topic-checkbox-grid">{% for topic in topics %}<label><input type="checkbox" name="scenario_ids" value="{{ topic.id }}" {% if topic.id in selected_topic_ids %}checked{% endif %}><span><i class="fa-solid {{ topic.icon }}"></i><b>{{ topic.title }}</b><small>{{ topic.catalog_profile.domain if topic.catalog_profile else topic.description|truncate(55) }}</small></span></label>{% else %}<div class="inline-empty">هنوز موقعیتی ساخته نشده است.</div>{% endfor %}</div>
+    <div class="editor-section-heading mt-5"><span>۴</span><div><h2>پیش‌نیازهای آموزشی</h2><p>مهارت‌هایی را انتخاب کنید که بهتر است پیش از این مهارت آموخته شوند.</p></div></div>
+    <div class="skill-checkbox-grid">{% for item in skills %}{% if not skill or item.id != skill.id %}<label><input type="checkbox" name="prerequisite_ids" value="{{ item.id }}" {% if skill and item.id in skill.prerequisite_ids %}checked{% endif %}><span><i class="fa-solid {{ item.icon }}"></i><b>{{ item.title }}</b><small>{{ item.description|truncate(70) }}</small></span></label>{% endif %}{% else %}<div class="inline-empty">مهارت دیگری برای انتخاب وجود ندارد.</div>{% endfor %}</div>
+    <div class="editor-publish-option"><label class="form-check"><input class="form-check-input" type="checkbox" name="is_published" value="1" {% if not skill or skill.is_published %}checked{% endif %}><span><b>مهارت منتشر شود</b><small>مهارت منتشرشده در مسیرهای آموزشی قابل استفاده است.</small></span></label></div>
+    <div class="editor-footer sticky-editor-footer"><a class="btn btn-light" href="{{ url_for('admin.skill_catalog') }}">بازگشت بدون ذخیره</a><button class="btn btn-primary-custom btn-lg" type="submit"><i class="fa-solid fa-floppy-disk ms-2"></i>{{ 'ذخیره تغییرات' if skill else 'ساخت مهارت' }}</button></div>
+  </form>
+</div>
+{% endblock %}

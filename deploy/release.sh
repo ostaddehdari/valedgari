@@ -51,6 +51,7 @@ if [[ "${HAS_USERS}" == "1" && "${HAS_ALEMBIC}" == "0" ]]; then
 fi
 "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app db upgrade
 "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app migrate-stage15-data
+"${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app seed-scenario-library
 if [[ "${VALEDGARI_SEED_PILOT:-0}" == "1" ]]; then
   "${RUN_APP[@]}" "${APP_DIR}/.venv/bin/flask" --app wsgi:app seed-stage15-pilot
 fi

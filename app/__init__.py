@@ -185,6 +185,14 @@ def create_app(config_object=None):
         summary = seed_stage15_pilot()
         click.echo(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 
+    @app.cli.command("seed-scenario-library")
+    def seed_scenario_library_command():
+        """Create idempotent professional drafts for all topics and crisis levels."""
+        from .scenario_library import seed_professional_scenario_library
+
+        summary = seed_professional_scenario_library()
+        click.echo(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+
     @app.cli.command("migrate-stage15-data")
     def migrate_stage15_data_command():
         """Idempotently move legacy role/profile data to Stage 15 profiles."""
