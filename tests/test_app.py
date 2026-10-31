@@ -2873,8 +2873,24 @@ def test_stage15_role_forms_are_profile_schemas_with_fake_records(app):
 
 def test_stage15_professional_scenario_library_covers_every_topic_and_level(app):
     from app.scenario_library import LIBRARY_PREFIX, seed_professional_scenario_library
+    from app.seed import TOPICS
 
     with app.app_context():
+        # Match a legacy production database: five old topics and no Stage 15
+        # crisis/style catalog. The library command must repair prerequisites.
+        db.drop_all()
+        db.create_all()
+        for slug, title, description, icon, _domain, _skill_slug in TOPICS[:5]:
+            db.session.add(
+                ScenarioTopic(
+                    slug=slug,
+                    title=title,
+                    description=description,
+                    icon=icon,
+                )
+            )
+        db.session.commit()
+
         first = seed_professional_scenario_library()
         second = seed_professional_scenario_library()
         assert first["topics"] == 25
@@ -2883,8 +2899,14 @@ def test_stage15_professional_scenario_library_covers_every_topic_and_level(app)
         assert first["narratives_created"] == 250
         assert first["reactions_created"] == 1000
         assert first["missing_cells"] == 0
+        assert first["catalog_created"]["topics"] == 20
+        assert first["catalog_created"]["skills"] == 6
+        assert first["catalog_created"]["topic_levels"] == 125
+        assert first["catalog_created"]["parenting_styles"] == 4
+        assert first["catalog_created"]["crisis_levels"] == 5
         assert second["narratives_created"] == 0
         assert second["reactions_created"] == 0
+        assert not any(second["catalog_created"].values())
         assert second["narratives_total"] == 250
         assert second["reactions_total"] == 1000
 

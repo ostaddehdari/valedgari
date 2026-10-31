@@ -8,12 +8,17 @@ import json
 
 from .extensions import db
 from .models import (
+    CrisisLevelDefinition,
     ParentingStyleDefinition,
+    ScenarioLevel,
     ScenarioNarrative,
     ScenarioReaction,
     ScenarioTopic,
+    ScenarioTopicProfile,
+    ScenarioTopicSkillMembership,
     SkillModule,
 )
+from .seed import CRISIS_LEVELS, LEVELS, PARENTING_STYLES, SKILLS, TOPICS
 
 
 LIBRARY_PREFIX = "stage15-professional"
@@ -56,6 +61,136 @@ TOPIC_CASES = {
     "body-image": (("اجتناب از عکس و مقایسه بدن با دیگران", "هر بار عکس خودم را می‌بینم فقط ایرادهایم را می‌بینم."), ("پیروی سخت‌گیرانه از توصیه‌های ظاهری شبکه اجتماعی", "اگر شبیه آن‌ها نباشم حس می‌کنم هیچ‌کس دوستم ندارد.")),
     "career-choice": (("اصرار خانواده بر رشته‌ای متفاوت از علاقه نوجوان", "می‌ترسم آینده‌ام را برای خواسته دیگران زندگی کنم."), ("سردرگمی میان چند مسیر تحصیلی و شغلی", "هنوز مطمئن نیستم؛ فشار برای تصمیم فوری بیشتر گیجم می‌کند.")),
 }
+
+
+def ensure_scenario_catalog():
+    """Fill missing Stage 15 catalog rows without overwriting production edits."""
+    created = {
+        "skills": 0,
+        "topics": 0,
+        "topic_levels": 0,
+        "crisis_levels": 0,
+        "parenting_styles": 0,
+        "topic_profiles": 0,
+        "skill_links": 0,
+    }
+    skills = {item.slug: item for item in SkillModule.query.all()}
+    for order, (slug, title, description, icon, duration) in enumerate(SKILLS, 1):
+        if slug in skills:
+            continue
+        skill = SkillModule(
+            slug=slug,
+            title=title,
+            description=description,
+            icon=icon,
+            duration=duration,
+            sort_order=order,
+        )
+        db.session.add(skill)
+        skills[slug] = skill
+        created["skills"] += 1
+    db.session.flush()
+
+    topics = {item.slug: item for item in ScenarioTopic.query.all()}
+    for order, (slug, title, description, icon, domain, skill_slug) in enumerate(TOPICS, 1):
+        topic = topics.get(slug)
+        if not topic:
+            topic = ScenarioTopic(
+                slug=slug,
+                title=title,
+                description=description,
+                icon=icon,
+                is_published=True,
+            )
+            db.session.add(topic)
+            db.session.flush()
+            topics[slug] = topic
+            created["topics"] += 1
+        existing_levels = {item.level for item in topic.levels}
+        for level, label in LEVELS:
+            if level in existing_levels:
+                continue
+            db.session.add(
+                ScenarioLevel(
+                    topic_id=topic.id,
+                    level=level,
+                    label=label,
+                    description=(
+                        f"این موقعیت در سطح {label} قرار دارد؛ ابتدا شدت هیجان و ایمنی را بسنجید."
+                    ),
+                    recommended_action=(
+                        "آرام بمانید، مشاهده را بدون قضاوت بیان کنید، احساس نوجوان را "
+                        "بازتاب دهید و برای قدم بعدی توافق بگیرید."
+                    ),
+                    wrong_action="تهدید، تحقیر، مقایسه یا تصمیم‌گیری کامل به‌جای نوجوان.",
+                    consequence=(
+                        "احتمال مقاومت، پنهان‌کاری یا فاصله عاطفی بیشتر می‌شود. "
+                        "این پیامد قطعی نیست و به زمینه خانواده وابسته است."
+                    ),
+                )
+            )
+            created["topic_levels"] += 1
+        target_skill = skills.get(skill_slug)
+        profile = topic.catalog_profile
+        if not profile:
+            profile = ScenarioTopicProfile(
+                topic_id=topic.id,
+                domain=domain,
+                target_skill_id=target_skill.id if target_skill else None,
+                status="active",
+                sort_order=order,
+            )
+            db.session.add(profile)
+            created["topic_profiles"] += 1
+        if target_skill and not ScenarioTopicSkillMembership.query.filter_by(
+            topic_id=topic.id, skill_id=target_skill.id
+        ).first():
+            db.session.add(
+                ScenarioTopicSkillMembership(
+                    topic_id=topic.id,
+                    skill_id=target_skill.id,
+                    sort_order=0,
+                )
+            )
+            created["skill_links"] += 1
+
+    existing_crisis_levels = {item.level for item in CrisisLevelDefinition.query.all()}
+    for order, (level, code, title, color, description, markers) in enumerate(
+        CRISIS_LEVELS, 1
+    ):
+        if level in existing_crisis_levels:
+            continue
+        db.session.add(
+            CrisisLevelDefinition(
+                level=level,
+                code=code,
+                title=title,
+                color=color,
+                description=description,
+                behavioral_markers_json=json.dumps(markers, ensure_ascii=False),
+                sort_order=order,
+            )
+        )
+        created["crisis_levels"] += 1
+
+    existing_styles = {item.code for item in ParentingStyleDefinition.query.all()}
+    for order, (code, title, description, traits, color) in enumerate(PARENTING_STYLES, 1):
+        if code in existing_styles:
+            continue
+        db.session.add(
+            ParentingStyleDefinition(
+                code=code,
+                title=title,
+                description=description,
+                traits_json=json.dumps(traits, ensure_ascii=False),
+                color=color,
+                is_active=True,
+                sort_order=order,
+            )
+        )
+        created["parenting_styles"] += 1
+    db.session.flush()
+    return created
 
 
 def _skill_ids(skills, *slugs):
@@ -115,6 +250,7 @@ def _reaction_payload(style, topic, quote, level, target_slug, skills):
 
 def seed_professional_scenario_library():
     """Create two review-ready drafts for every topic at every crisis level."""
+    catalog_created = ensure_scenario_catalog()
     topics = {item.slug: item for item in ScenarioTopic.query.all()}
     skills = {item.slug: item for item in SkillModule.query.all()}
     styles = {
@@ -238,4 +374,5 @@ def seed_professional_scenario_library():
         "reactions_total": total_reactions,
         "missing_cells": missing_cells,
         "status": "draft",
+        "catalog_created": catalog_created,
     }
