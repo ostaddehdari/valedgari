@@ -807,6 +807,17 @@ class ScenarioTopic(db.Model):
     levels = db.relationship(
         "ScenarioLevel", backref="topic", lazy=True, cascade="all, delete-orphan"
     )
+    skill_links = db.relationship(
+        "ScenarioTopicSkillMembership",
+        backref="topic",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ScenarioTopicSkillMembership.sort_order",
+    )
+
+    @property
+    def skills(self):
+        return [item.skill for item in self.skill_links]
 
 
 class ScenarioLevel(db.Model):
@@ -871,6 +882,21 @@ class ScenarioTopicProfile(db.Model):
     target_skill = db.relationship("SkillModule")
 
 
+class ScenarioTopicSkillMembership(db.Model):
+    __tablename__ = "scenario_topic_skill_memberships"
+    id = db.Column(db.Integer, primary_key=True)
+    topic_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_topics.id"), nullable=False, index=True
+    )
+    skill_id = db.Column(
+        db.Integer, db.ForeignKey("skill_modules.id"), nullable=False, index=True
+    )
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    skill = db.relationship("SkillModule")
+    __table_args__ = (db.UniqueConstraint("topic_id", "skill_id"),)
+
+
 class CrisisLevelDefinition(db.Model):
     __tablename__ = "crisis_level_definitions"
     id = db.Column(db.Integer, primary_key=True)
@@ -929,6 +955,15 @@ class ScenarioNarrative(db.Model):
     copied_from_id = db.Column(
         db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=True, index=True
     )
+    previous_narrative_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=True, index=True
+    )
+    growth_next_narrative_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=True, index=True
+    )
+    fall_next_narrative_id = db.Column(
+        db.Integer, db.ForeignKey("scenario_narratives.id"), nullable=True, index=True
+    )
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = db.Column(
@@ -938,7 +973,18 @@ class ScenarioNarrative(db.Model):
 
     topic = db.relationship("ScenarioTopic")
     creator = db.relationship("User")
-    copied_from = db.relationship("ScenarioNarrative", remote_side=[id])
+    copied_from = db.relationship(
+        "ScenarioNarrative", remote_side=[id], foreign_keys=[copied_from_id]
+    )
+    previous_narrative = db.relationship(
+        "ScenarioNarrative", remote_side=[id], foreign_keys=[previous_narrative_id]
+    )
+    growth_next_narrative = db.relationship(
+        "ScenarioNarrative", remote_side=[id], foreign_keys=[growth_next_narrative_id]
+    )
+    fall_next_narrative = db.relationship(
+        "ScenarioNarrative", remote_side=[id], foreign_keys=[fall_next_narrative_id]
+    )
     reactions = db.relationship(
         "ScenarioReaction",
         backref="narrative",

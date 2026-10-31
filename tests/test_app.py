@@ -59,6 +59,7 @@ from app.models import (
     ScenarioNarrativeAttempt,
     ScenarioReaction,
     ScenarioTopicProfile,
+    ScenarioTopicSkillMembership,
     SkillDomain,
     SkillModule,
     SkillProgress,
@@ -169,13 +170,19 @@ def test_parent_forbidden_from_admin(client):
     assert client.get("/admin/").status_code == 403
 
 
-def test_admin_can_open_builders(client):
+def test_admin_can_open_builders(client, app):
     login(client, mobile="09120000001", password="AdminPass123")
     assert client.get("/admin/").status_code == 200
     assert client.get("/admin/tree").status_code == 200
+    assert client.get("/admin/tree/topics/new").status_code == 200
+    with app.app_context():
+        topic_id = ScenarioTopic.query.first().id
+    assert client.get(f"/admin/tree/topics/{topic_id}/edit").status_code == 200
+    assert client.get(f"/admin/tree/topics/{topic_id}/narratives/new").status_code == 200
     assert client.get("/admin/forms").status_code == 200
     assert client.get("/admin/projects").status_code == 200
-    assert client.get("/admin/assessments/baumrind").status_code == 200
+    assert client.get("/admin/assessments/baumrind").status_code == 404
+    assert client.get("/admin/personalization").status_code == 404
     assert client.get("/admin/learning-path").status_code == 200
     assert client.get("/admin/assistant-control").status_code == 200
 
@@ -356,36 +363,40 @@ def approved_baumrind_questions():
     return questions
 
 
-def publish_test_baumrind(client):
-    login(client, mobile="09120000001", password="AdminPass123")
-    client.post(
-        "/admin/assessments/baumrind",
-        data={
-            "action": "save_metadata",
-            "title": "نسخه آزمون تأییدشده",
-            "version": "test-1",
-            "source_reference": "منبع علمی نمونه برای تست نرم‌افزار",
-            "license_note": "مجوز نمونه فقط برای تست خودکار",
-            "disclaimer": "این نتیجه تشخیص بالینی نیست.",
-        },
-    )
-    client.post(
-        "/admin/assessments/baumrind",
-        data={
-            "action": "import_questions",
-            "questions_json": json.dumps(approved_baumrind_questions(), ensure_ascii=False),
-        },
-    )
-    response = client.post(
-        "/admin/assessments/baumrind", data={"action": "publish"}
-    )
-    assert response.status_code == 302
-    assert client.get("/admin/assessments/baumrind").status_code == 200
-    client.post("/auth/logout")
+def publish_test_baumrind(app):
+    """Parent scoring stays supported although its old admin page is removed."""
+    with app.app_context():
+        admin = User.query.filter_by(mobile="09120000001").one()
+        instrument = AssessmentInstrument(
+            framework_slug="baumrind",
+            title="نسخه آزمون تأییدشده",
+            version="test-1",
+            status="published",
+            source_reference="منبع علمی نمونه برای تست نرم‌افزار",
+            license_note="مجوز نمونه فقط برای تست خودکار",
+            disclaimer="این نتیجه تشخیص بالینی نیست.",
+            scoring_schema_json=json.dumps({"dimensions": {
+                "authoritative": "مقتدرانه",
+                "authoritarian": "مستبدانه",
+                "permissive": "سهل‌گیرانه",
+            }}),
+            created_by=admin.id,
+            approved_by=admin.id,
+            approved_at=utcnow(),
+        )
+        db.session.add(instrument)
+        db.session.flush()
+        for sort_order, item in enumerate(approved_baumrind_questions(), 1):
+            db.session.add(AssessmentQuestion(
+                instrument_id=instrument.id,
+                sort_order=sort_order,
+                **item,
+            ))
+        db.session.commit()
 
 
 def test_baumrind_scoring_is_versioned_per_child(client, app):
-    publish_test_baumrind(client)
+    publish_test_baumrind(app)
     login(client)
     client.post(
         "/dashboard/children",
@@ -413,15 +424,14 @@ def test_baumrind_scoring_is_versioned_per_child(client, app):
         }
 
 
-def test_baumrind_cannot_publish_without_scientific_gate(client, app):
+def test_removed_admin_pages_return_not_found(client, app):
     login(client, mobile="09120000001", password="AdminPass123")
-    response = client.post(
-        "/admin/assessments/baumrind",
-        data={"action": "publish"},
-        follow_redirects=True,
-    )
-    assert "منبع دقیق نسخه پرسش‌نامه ثبت نشده است" in response.get_data(as_text=True)
+    assert client.get("/admin/assessments/baumrind").status_code == 404
+    assert client.post("/admin/assessments/baumrind").status_code == 404
+    assert client.get("/admin/personalization").status_code == 404
+    assert client.post("/admin/personalization").status_code == 404
     with app.app_context():
+        assert AssessmentInstrument.query.count() == 1
         assert AssessmentInstrument.query.one().status == "draft"
         assert AssessmentQuestion.query.count() == 0
 
@@ -525,13 +535,14 @@ def test_recommendation_is_isolated_between_parents(client, app):
     assert client.get(f"/dashboard/recommendations/{run_id}").status_code == 404
 
 
-def test_admin_can_manage_personalization_rules(client):
+def test_admin_navigation_omits_removed_pages(client):
     login(client, mobile="09120000001", password="AdminPass123")
-    page = client.get("/admin/personalization")
+    page = client.get("/admin/")
     assert page.status_code == 200
     body = page.get_data(as_text=True)
-    assert "شخصی‌سازی توضیح‌پذیر" in body
-    assert "ساخت مسیر شخصی‌سازی" in body
+    assert "/admin/personalization" not in body
+    assert "/admin/assessments/baumrind" not in body
+    assert "admin-dashboard-tools" in body
 
 
 def create_weekly_plan(client, app, child_name="سارا", topic_slug="anger"):
@@ -1876,9 +1887,10 @@ def course_builder_payload(action="publish", slug="new-parent-course", structure
 
 def test_stage_eleven_seeds_courses_with_skills_topics_and_curriculum(app):
     with app.app_context():
-        assert Course.query.filter_by(status="published").count() == 3
+        assert Course.query.filter_by(status="published").count() == 5
         free = Course.query.filter_by(slug="pause-before-reaction").one()
         assert free.is_free is True
+        assert free.cover_url.startswith("img/courses/")
         assert len(free.skills) == 1
         assert len(free.topics) == 1
         assert len(free.active_units) == 3
@@ -2424,6 +2436,35 @@ def test_narrative_publish_requires_all_four_complete_reactions(app):
         assert any("هر چهار سبک" in error for error in errors)
 
 
+def test_topic_editor_saves_multiple_skills_and_list_shows_actions(client, app):
+    login(client, mobile="09120000001", password="AdminPass123")
+    with app.app_context():
+        skill_ids = [item.id for item in SkillModule.query.order_by(SkillModule.id).limit(3)]
+    response = client.post(
+        "/admin/tree/topics/new",
+        data={
+            "title": "موقعیت چندمهارتی آزمایشی",
+            "slug": "multi-skill-situation-test",
+            "description": "موقعیتی برای بررسی انتخاب هم‌زمان چند مهارت.",
+            "domain": "گفت‌وگوی خانوادگی",
+            "status": "active",
+            "icon": "fa-comments",
+            "skill_ids": [str(item) for item in skill_ids],
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        topic = ScenarioTopic.query.filter_by(slug="multi-skill-situation-test").one()
+        assert [item.skill_id for item in topic.skill_links] == skill_ids
+        assert len(topic.levels) == 5
+        topic_id = topic.id
+    page = client.get("/admin/tree")
+    body = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "موقعیت چندمهارتی آزمایشی" in body
+    assert f"/admin/tree/topics/{topic_id}/narratives/new" in body
+
+
 def test_admin_builds_and_publishes_four_style_narrative(client, app):
     login(client, mobile="09120000001", password="AdminPass123")
     with app.app_context():
@@ -2448,7 +2489,7 @@ def test_admin_builds_and_publishes_four_style_narrative(client, app):
         data[f"long_term_{style.code}"] = "پیامد بلندمدت این انتخاب بر رابطه توضیح داده می‌شود."
         data[f"retry_{style.code}"] = "در تلاش بعدی جمله را کوتاه و بدون سرزنش بیان کنید."
         data[f"score_{style.code}"] = "100" if style.code == "authoritative" else "30"
-    response = client.post("/admin/tree", data=data)
+    response = client.post(f"/admin/tree/topics/{topic_id}/narratives/new", data=data)
     assert response.status_code == 302
     with app.app_context():
         narrative = ScenarioNarrative.query.filter_by(title=data["title"]).one()
@@ -2461,9 +2502,12 @@ def test_admin_builds_and_publishes_four_style_narrative(client, app):
     assert published.status_code == 302
     with app.app_context():
         assert db.session.get(ScenarioNarrative, narrative_id).status == "published"
-    page = client.get(f"/admin/tree?topic_id={topic_id}&level=3&narrative_id={narrative_id}")
+    page = client.get(
+        f"/admin/tree?topic_id={topic_id}&level=3&narrative_id={narrative_id}",
+        follow_redirects=True,
+    )
     assert page.status_code == 200
-    assert "چهار واکنش" in page.get_data(as_text=True)
+    assert "چهار واکنش مبتنی بر بامریند" in page.get_data(as_text=True)
 
 
 def test_parent_practice_hides_style_then_reveals_feedback(client, app):
@@ -2770,6 +2814,15 @@ def test_stage15_pilot_has_exact_contract_overlap_and_independent_children(app):
         assert first["covered_unique"] == 30
         assert first["independent_children"] == 10
         assert first["total_children"] == 40
+        assert first["pilot_courses"] == 5
+        assert first["pilot_paid_orders"] == 1
+        assert first["pilot_buyer_mobile"] == "09130134985"
+        buyer = User.query.filter_by(mobile="09130134985").one()
+        assert CourseOrder.query.filter_by(user_id=buyer.id, status="paid").count() == 1
+        assert PaymentTransaction.query.join(CourseOrder).filter(
+            CourseOrder.user_id == buyer.id,
+            PaymentTransaction.status == "verified",
+        ).count() == 1
 
 
 def test_stage15_role_forms_are_profile_schemas_with_fake_records(app):

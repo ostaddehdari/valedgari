@@ -16,6 +16,10 @@
 
 Seed تکرارپذیر است؛ اجرای دوباره سازمان، قرارداد، والد، فرزند، عضویت یا پروفایل تکراری نمی‌سازد.
 
+همین Seed پنج دوره نمایشی با تصویر محلی مرتبط می‌سازد و برای والد با شماره
+`09130134985` یک سفارش، فاکتور، تراکنش پرداخت‌شده و ثبت‌نام دوره ایجاد می‌کند.
+این خرید کاملاً نمایشی است و به درگاه واقعی ارسال نمی‌شود.
+
 ```bash
 read -rsp 'Pilot password: ' PILOT_DEFAULT_PASSWORD
 export PILOT_DEFAULT_PASSWORD
@@ -43,6 +47,20 @@ Nginx باعث نمایش رابط قدیمی نمی‌شود.
 ```bash
 VALEDGARI_SEED_PILOT=1 bash deploy/release.sh
 ```
+
+پس از انتشار، revision و داده‌های نمایشی را بررسی کنید:
+
+```bash
+curl -fsS http://127.0.0.1:8010/health/release
+
+sqlite3 /var/www/valedgari/instance/valedgari.db \
+  "SELECT version_num FROM alembic_version;"
+
+sqlite3 /var/www/valedgari/instance/valedgari.db \
+  "SELECT u.mobile, o.order_no, o.status FROM course_orders o JOIN users u ON u.id=o.user_id WHERE u.mobile='09130134985';"
+```
+
+revision مورد انتظار این انتشار `31c0d2e4f5a6` است.
 
 در production مقدار `PILOT_DEFAULT_PASSWORD` باید از قبل در فایل root-only `/etc/valedgari.env` ثبت شده باشد و نباید در خط فرمان قرار گیرد.
 

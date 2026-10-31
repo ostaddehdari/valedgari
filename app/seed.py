@@ -16,6 +16,7 @@ from .models import (
     ScenarioLevel,
     ScenarioTopic,
     ScenarioTopicProfile,
+    ScenarioTopicSkillMembership,
     SafetyProtocol,
     SkillDomain,
     SkillDomainMembership,
@@ -84,7 +85,7 @@ PARENTING_STYLES = [
     ("authoritative", "مقتدرانه", "گرمی رابطه همراه با مرز روشن و مشارکت متناسب با سن.", ["همدلی", "مرز روشن", "گفت‌وگو", "پیامد مرتبط"], "#176254"),
     ("authoritarian", "مستبدانه", "کنترل و اطاعت بالا با گفت‌وگو و انعطاف کم.", ["دستور", "تنبیه", "کنترل بالا", "گفت‌وگوی کم"], "#a44848"),
     ("permissive", "سهل‌گیرانه", "گرمی بالا با مرز و پیگیری ناکافی.", ["پذیرش", "مرز کم", "پیگیری کم", "اجتناب از تعارض"], "#c48a2b"),
-    ("uninvolved", "غافلانه", "درگیری عاطفی و نظارت اندک یا پاسخ‌گویی نامنظم.", ["فاصله", "نظارت کم", "پاسخ‌گویی کم", "عدم پیگیری"], "#697a76"),
+    ("uninvolved", "طردکننده/بی‌توجه", "درگیری عاطفی و نظارت اندک یا پاسخ‌گویی نامنظم.", ["فاصله", "نظارت کم", "پاسخ‌گویی کم", "عدم پیگیری"], "#697a76"),
 ]
 
 
@@ -127,6 +128,7 @@ COURSE_SEEDS = [
         "description": "در این دوره یاد می‌گیرید پیش از پاسخ تکانه‌ای مکث کنید، هیجان خود را نام‌گذاری کنید و گفت‌وگو را در زمان امن ادامه دهید.",
         "level": "foundation",
         "price": 0,
+        "cover": "img/courses/calm-response.svg",
         "skills": ["emotion-regulation"],
         "topics": ["anger"],
         "styles": ["general", "authoritarian"],
@@ -143,6 +145,7 @@ COURSE_SEEDS = [
         "description": "دوره‌ای کاربردی برای بازتاب احساس، سؤال باز و جلوگیری از نصیحت زودهنگام در گفت‌وگوهای روزمره.",
         "level": "foundation",
         "price": 390000,
+        "cover": "img/courses/active-listening.svg",
         "skills": ["active-listening", "empathy"],
         "topics": ["school-drop", "friends"],
         "styles": ["authoritative", "general"],
@@ -158,12 +161,46 @@ COURSE_SEEDS = [
         "description": "برای خانواده‌هایی که می‌خواهند بدون تهدید و جنگ قدرت، مرزهای قابل پیش‌بینی و قابل پیگیری بسازند.",
         "level": "intermediate",
         "price": 490000,
+        "cover": "img/courses/respectful-boundaries.svg",
         "skills": ["boundaries", "problem-solving"],
         "topics": ["screen-time", "lying"],
         "styles": ["authoritative", "permissive"],
         "featured": True,
         "chapters": [
             ("ساخت قانون قابل اجرا", [("قانون کوتاه و روشن", "text", "قانون را درباره رفتار قابل مشاهده و در کمتر از پانزده کلمه بنویسید."), ("پیامد مرتبط", "text", "پیامد باید از قبل قابل پیش‌بینی، مرتبط با رفتار و بدون تحقیر باشد.")]),
+        ],
+    },
+    {
+        "slug": "family-problem-solving",
+        "title": "حل مسئله خانوادگی بدون جنگ قدرت",
+        "subtitle": "از تعارض روزمره تا توافق کوچک و قابل اجرا",
+        "description": "مسئله را بدون مقصرسازی تعریف کنید، نیاز هر دو طرف را ببینید و راه‌حل آزمایشی قابل پیگیری بسازید.",
+        "level": "intermediate",
+        "price": 420000,
+        "cover": "img/courses/problem-solving.svg",
+        "skills": ["problem-solving", "active-listening"],
+        "topics": ["sibling-conflict", "household-rules"],
+        "styles": ["authoritative", "general"],
+        "featured": True,
+        "chapters": [
+            ("تعریف مسئله مشترک", [("جداکردن مسئله از شخصیت", "text", "رفتار قابل مشاهده را بنویسید و از برچسب‌زدن به شخصیت نوجوان خودداری کنید."), ("دیدن دو نیاز", "text", "نیاز والد و نوجوان را کنار هم قرار دهید تا مسئله به نبرد برنده و بازنده تبدیل نشود.")]),
+            ("ساخت توافق", [("راه‌حل آزمایشی", "text", "یک توافق کوتاه با زمان بازبینی مشخص انتخاب کنید.")]),
+        ],
+    },
+    {
+        "slug": "teen-motivation",
+        "title": "انگیزه‌سازی برای نوجوان",
+        "subtitle": "شروع با قدم کوچک، بدون تهدید و پاداش افراطی",
+        "description": "مانع شروع را پیدا کنید، هدف بزرگ را به قدم‌های کوتاه تبدیل کنید و استقلال نوجوان را در مسیر حفظ کنید.",
+        "level": "foundation",
+        "price": 360000,
+        "cover": "img/courses/teen-motivation.svg",
+        "skills": ["motivation", "empathy"],
+        "topics": ["school-drop", "homework-resistance", "responsibility"],
+        "styles": ["authoritative", "permissive"],
+        "featured": True,
+        "chapters": [
+            ("مانع شروع", [("پرسش بدون بازجویی", "text", "به‌جای سرزنش، مانع واقعی شروع را با یک پرسش کوتاه پیدا کنید."), ("قدم پانزده‌دقیقه‌ای", "text", "کار را به اولین قدمی تبدیل کنید که در پانزده دقیقه قابل انجام باشد.")]),
         ],
     },
 ]
@@ -345,6 +382,15 @@ def seed_content():
                 profile.domain = domain
                 profile.target_skill_id = skills.get(skill_slug).id if skills.get(skill_slug) else None
                 profile.sort_order = order
+            skill = skills.get(skill_slug)
+            if skill and not ScenarioTopicSkillMembership.query.filter_by(
+                topic_id=topic.id, skill_id=skill.id
+            ).first():
+                db.session.add(
+                    ScenarioTopicSkillMembership(
+                        topic_id=topic.id, skill_id=skill.id, sort_order=0
+                    )
+                )
     db.session.flush()
 
     if SkillDomain.query.count() == 0:
@@ -410,6 +456,7 @@ def seed_content():
                 subtitle=item["subtitle"],
                 description=item["description"],
                 instructor_name="تیم علمی والدیار",
+                cover_url=item["cover"],
                 level=item["level"],
                 duration_minutes=sum(
                     7 for _chapter_title, units in item["chapters"] for _unit in units

@@ -51,6 +51,11 @@ LEGACY_STAGE6_COLUMNS = {
     "sponsored_projects": {
         "contract_id": "INTEGER",
     },
+    "scenario_narratives": {
+        "previous_narrative_id": "INTEGER",
+        "growth_next_narrative_id": "INTEGER",
+        "fall_next_narrative_id": "INTEGER",
+    },
 }
 
 
